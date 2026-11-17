@@ -4,12 +4,25 @@ import {
   Plus,
   Trash2,
   UserRound,
-  GraduationCap,
   Save,
   CheckCircle2,
   AlertCircle,
+  Search,
+  Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import api from "../../../../api/axios";
+
+const formularioVacio = {
+  dni: "",
+  nombres: "",
+  apellidos: "",
+  programa_estudios: "Diseño y Programación Web",
+  semestre: "VI Semestre",
+  correo: "",
+  telefono: "",
+  estado: "En progreso",
+};
 
 export default function ModalEstudiante({
   isOpen,
@@ -18,26 +31,20 @@ export default function ModalEstudiante({
   onGuardadoExitoso,
   darkMode = false,
 }) {
-  const [formData, setFormData] = useState({
-    dni: "",
-    nombres: "",
-    apellidos: "",
-    programa_estudios: "Diseño y Programación Web",
-    semestre: "VI Semestre",
-    correo: "",
-    telefono: "",
-    estado: "En progreso",
-  });
+  const [formData, setFormData] = useState(formularioVacio);
 
   const [foto, setFoto] = useState(null);
   const [fotoPreview, setFotoPreview] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [buscandoDni, setBuscandoDni] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
   const inputFotoRef = useRef(null);
 
   // Cargar datos si es edición o limpiar si es nuevo registro
   useEffect(() => {
     setErrorMsg("");
+    setOkMsg("");
     if (estudianteActual) {
       setFormData({
         dni: estudianteActual.dni || "",
@@ -52,22 +59,61 @@ export default function ModalEstudiante({
       setFotoPreview(estudianteActual.foto_url || "");
       setFoto(null);
     } else {
-      setFormData({
-        dni: "",
-        nombres: "",
-        apellidos: "",
-        programa_estudios: "Diseño y Programación Web",
-        semestre: "VI Semestre",
-        correo: "",
-        telefono: "",
-        estado: "En progreso",
-      });
+      setFormData(formularioVacio);
       setFoto(null);
       setFotoPreview("");
     }
   }, [estudianteActual, isOpen]);
 
   if (!isOpen) return null;
+
+  const dniCompleto = formData.dni.length === 8;
+
+  // Consulta RENIEC (vía tu backend) y completa nombres y apellidos
+  const buscarDniReniec = async () => {
+    setErrorMsg("");
+    setOkMsg("");
+
+    if (!/^\d{8}$/.test(formData.dni)) {
+      setErrorMsg("El DNI debe tener exactamente 8 dígitos numéricos.");
+      return;
+    }
+
+    setBuscandoDni(true);
+    try {
+      const res = await api.get(`/estudiantes/dni/${formData.dni}`);
+      const data = res.data?.data || res.data;
+
+      if (data) {
+        // Acepta tanto los nombres de Decolecta como los de tu backend
+        const nombres = data.nombres || data.first_name || "";
+        const paterno = data.apellido_paterno || data.first_last_name || "";
+        const materno = data.apellido_materno || data.second_last_name || "";
+        const apellidos =
+          data.apellidos || [paterno, materno].filter(Boolean).join(" ");
+
+        setFormData((prev) => ({
+          ...prev,
+          nombres: nombres || prev.nombres,
+          apellidos: apellidos || prev.apellidos,
+        }));
+
+        if (nombres || apellidos) {
+          setOkMsg("¡Datos obtenidos correctamente de RENIEC!");
+        } else {
+          setErrorMsg("RENIEC no devolvió nombres para ese DNI.");
+        }
+      }
+    } catch (err) {
+      setErrorMsg(
+        err.response?.data?.error ||
+          err.response?.data?.message ||
+          "No se encontró información para el DNI ingresado."
+      );
+    } finally {
+      setBuscandoDni(false);
+    }
+  };
 
   const handleSeleccionarFoto = (e) => {
     const file = e.target.files?.[0];
@@ -94,6 +140,7 @@ export default function ModalEstudiante({
     e.preventDefault();
     setGuardando(true);
     setErrorMsg("");
+    setOkMsg("");
 
     try {
       // Usamos FormData por si se envía imagen junto con los campos
@@ -189,6 +236,13 @@ export default function ModalEstudiante({
             </div>
           )}
 
+          {okMsg && (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              <CheckCircle2 size={18} className="shrink-0" />
+              <span>{okMsg}</span>
+            </div>
+          )}
+
           {/* Contenedor principal de 2 columnas (Izquierda Foto / Derecha Bloques) */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
             {/* COLUMNA IZQUIERDA: Imagen Estudiante */}
@@ -253,16 +307,52 @@ export default function ModalEstudiante({
                   <label className={`sm:col-span-4 text-xs font-semibold sm:text-right pr-2 ${tema.label}`}>
                     DNI <span className="text-rose-500">*</span>
                   </label>
-                  <div className="sm:col-span-8">
-                    <input
-                      type="text"
-                      maxLength="15"
-                      required
-                      value={formData.dni}
-                      onChange={(e) => setFormData({ ...formData, dni: e.target.value })}
-                      placeholder="Ej. 74589632"
-                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 ${tema.input}`}
-                    />
+                  <div className="sm:col-span-8 space-y-1">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength="15"
+                        required
+                        value={formData.dni}
+                        onChange={(e) => setFormData({ ...formData, dni: e.target.value.trim() })}
+                        onKeyDown={(e) => {
+                          // Enter busca en RENIEC en vez de enviar el formulario
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            buscarDniReniec();
+                          }
+                        }}
+                        placeholder="Ej. 74589632"
+                        className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 ${tema.input}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={buscarDniReniec}
+                        disabled={buscandoDni}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-slate-700 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                      >
+                        {buscandoDni ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            Buscando
+                          </>
+                        ) : (
+                          <>
+                            <Search size={14} />
+                            Buscar
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] font-bold tabular-nums">
+                      <span className={dniCompleto ? "text-emerald-600" : "text-slate-400"}>
+                        {formData.dni.length}/8
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-blue-600">
+                        <ShieldCheck size={12} /> Consulta RENIEC
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -276,7 +366,7 @@ export default function ModalEstudiante({
                       required
                       value={formData.nombres}
                       onChange={(e) => setFormData({ ...formData, nombres: e.target.value })}
-                      placeholder="Ej. Luis Fernando"
+                      placeholder="Se completa con el DNI o ingrese manual"
                       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 ${tema.input}`}
                     />
                   </div>
@@ -292,7 +382,7 @@ export default function ModalEstudiante({
                       required
                       value={formData.apellidos}
                       onChange={(e) => setFormData({ ...formData, apellidos: e.target.value })}
-                      placeholder="Ej. Quispe Mamani"
+                      placeholder="Se completa con el DNI o ingrese manual"
                       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 ${tema.input}`}
                     />
                   </div>

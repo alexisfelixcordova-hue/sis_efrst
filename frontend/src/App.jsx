@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 import Navbar from "./componentes/Layout/Navbar.jsx";
 import Sidebar from "./componentes/Layout/Sidebar.jsx";
@@ -6,6 +6,7 @@ import Dashboard from "./componentes/vistas/Dashboard.jsx";
 import Estudiantes from "./componentes/vistas/Estudiantes/Estudiantes.jsx";
 import PlantelDocente from "./componentes/vistas/Docente/Planteldocente.jsx";
 import FichaDocente from "./componentes/vistas/Docente/Fichadocente.jsx";
+import MisAlumnos from "./componentes/vistas/Docente/MisAlumnos.jsx";
 import Constancias from "./componentes/vistas/Constancias/Constancias.jsx";
 import VistaConstanciaPDF from "./componentes/vistas/Constancias/VistaConstanciaPDF.jsx";
 import Credenciales from "./componentes/vistas/Credenciales/Credenciales.jsx";
@@ -21,7 +22,7 @@ import ListaUsuario from "./componentes/Users/ListaUsuario.jsx";
 
 // --- Apps ---
 import Calendario from "./componentes/Apps/Calendario/Calendario.jsx";
-import Notas from "./componentes/Apps/Notas/Notas.jsx"; // ← renombra el archivo NOtas.jsx a Notas.jsx
+import Notas from "./componentes/Apps/Notas/Notas.jsx";
 import Projects from "./componentes/Apps/Projects/Projects.jsx";
 import FileManager from "./componentes/Apps/FileManager/FileManager.jsx";
 import Contacts from "./componentes/Apps/Contacts/Contacts.jsx";
@@ -35,7 +36,60 @@ function App() {
   const [constanciaSeleccionada, setConstanciaSeleccionada] = useState(null);
   const [darkMode, setDarkMode] = useState(false);
 
-  const [autenticado, setAutenticado] = useState(!!localStorage.getItem("token"));
+  const [autenticado, setAutenticado] = useState(false);
+  const [cargandoSesion, setCargandoSesion] = useState(true);
+  
+  // Estado para mantener al usuario fresco directamente desde la base de datos
+  const [usuarioBD, setUsuarioBD] = useState(null);
+
+  // Verificamos y sincronizamos el perfil fresco desde la base de datos al iniciar o recargar
+  useEffect(() => {
+    const verificarSesionBD = async () => {
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        setAutenticado(false);
+        setUsuarioBD(null);
+        setCargandoSesion(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API}/perfil`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          // Guardamos el usuario fresco directamente en el estado de React y opcionalmente en caché local solo como respaldo de sesión
+          setUsuarioBD(data.data);
+          localStorage.setItem("user", JSON.stringify(data.data));
+          setAutenticado(true);
+        } else {
+          // Si el token expiró o no es válido, limpiamos la sesión
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          setUsuarioBD(null);
+          setAutenticado(false);
+        }
+      } catch (error) {
+        console.error("Error al conectar con la base de datos:", error);
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        setUsuarioBD(null);
+        setAutenticado(false);
+      } finally {
+        setCargandoSesion(false);
+      }
+    };
+
+    verificarSesionBD();
+  }, []);
 
   const cambiarVista = (nuevaVista) => {
     setVista(nuevaVista);
@@ -68,6 +122,7 @@ function App() {
     setDocenteSeleccionado(null);
     setConstanciaSeleccionada(null);
     setVista("Dashboard");
+    setUsuarioBD(null);
     setAutenticado(false);
   };
 
@@ -95,6 +150,10 @@ function App() {
             onNuevoEstudiante={() => console.log("Nuevo estudiante")}
           />
         );
+
+      case "Mis Alumnos":
+      case "MisAlumnos":
+        return <MisAlumnos darkMode={darkMode} />;
 
       case "Asesores":
         return <PlantelDocente onVerFicha={abrirFichaDocente} darkMode={darkMode} />;
@@ -148,6 +207,17 @@ function App() {
     }
   };
 
+  if (cargandoSesion) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0f172a] text-white">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+          <p className="text-sm font-semibold tracking-wider">Sincronizando con WORLDNIC...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!autenticado) {
     return (
       <Login
@@ -163,11 +233,23 @@ function App() {
           const data = await res.json().catch(() => ({}));
           if (!res.ok || !data.success) throw new Error(data.message || "Credenciales incorrectas");
 
-          const { contrasena_hash, ...usuario } = data.user;
+          // Guardamos únicamente el token de acceso seguro
           localStorage.setItem("token", data.access_token);
-          localStorage.setItem("user", JSON.stringify(usuario));
         }}
-        onExito={() => setAutenticado(true)}
+        onExito={async () => {
+          // Al autenticarse con éxito, consultamos de inmediato el perfil real de la base de datos
+          const token = localStorage.getItem("token");
+          if (token) {
+            const res = await fetch(`${API}/perfil`, {
+              headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+              setUsuarioBD(data.data);
+            }
+          }
+          setAutenticado(true);
+        }}
       />
     );
   }
@@ -178,11 +260,13 @@ function App() {
         darkMode ? "bg-[#0f172a] text-white" : "bg-[#f5f8fc] text-[#172b4d]"
       }`}
     >
+      {/* Pasamos el usuario proveniente directamente de la base de datos al Sidebar */}
       <Sidebar
         vistaActual={vista}
         onCambiarVista={cambiarVista}
         darkMode={darkMode}
         onCerrarSesion={cerrarSesion}
+        usuario={usuarioBD}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">

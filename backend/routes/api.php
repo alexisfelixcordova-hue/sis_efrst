@@ -55,11 +55,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // ==========================================
     // EMPRESAS Y CONVENIOS
     // ==========================================
+
+    // 1. Coloca primero la ruta específica de consulta por RUC
     Route::get('/empresas/ruc/{ruc}', [EmpresaController::class, 'consultarRuc']);
+
+    // 2. Luego las demás rutas personalizadas
     Route::get('/empresas/{id}/expedientes', [EmpresaController::class, 'expedientes']);
+
+    // 3. Finalmente el recurso general al final
     Route::apiResource('empresas', EmpresaController::class);
 
     // Estudiantes
+    Route::get('/estudiantes/dni/{dni}', [EstudianteController::class, 'consultarDni']);
     Route::apiResource('estudiantes', EstudianteController::class);
 
     // Docentes

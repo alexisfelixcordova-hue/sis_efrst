@@ -191,17 +191,26 @@ const Campo = ({ label, requerido, extra, children }) => (
     </div>
 );
 
+/* ---------- Estado inicial del formulario ---------- */
+const formularioVacio = {
+    ruc: '',
+    razon_social: '',
+    estado: '',
+    condicion: '',
+    tipo_contribuyente: '',
+    departamento: '',
+    provincia: '',
+    distrito: '',
+    ubigeo: '',
+    supervisor_empresa_nombre: '',
+    telefono: '',
+    correo_electronico: '',
+    direccion: ''
+};
+
 export default function Empresas() {
     const [empresas, setEmpresas] = useState([]);
-    const [formData, setFormData] = useState({
-        ruc: '',
-        razon_social: '',
-        supervisor_empresa_nombre: '', // Corregido al campo real de la BD
-        telefono: '',
-        correo_electronico: '',
-        direccion: ''
-    });
-    const [empresaInfo, setEmpresaInfo] = useState(null);
+    const [formData, setFormData] = useState(formularioVacio);
     const [buscandoRuc, setBuscandoRuc] = useState(false);
     const [alerta, setAlerta] = useState({ mensaje: '', tipo: '' });
 
@@ -240,6 +249,8 @@ export default function Empresas() {
         setTimeout(() => setAlerta({ mensaje: '', tipo: '' }), 4000);
     };
 
+    const cambiarCampo = (campo) => (e) => setFormData(prev => ({ ...prev, [campo]: e.target.value }));
+
     const buscarRucSunat = async () => {
         if (formData.ruc.length !== 11) {
             mostrarAlerta('El RUC debe tener exactamente 11 dígitos.', 'error');
@@ -251,21 +262,35 @@ export default function Empresas() {
             const res = await axios.get(`${API_URL}/empresas/ruc/${formData.ruc}`, {
                 headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' }
             });
-            const data = res.data;
+            const data = res.data?.data || res.data;
 
             if (data) {
-                setEmpresaInfo(data);
+                // Dirección tal como la entrega SUNAT (sin repetir distrito / provincia / departamento)
+                const direccion = data.direccion || data.domicilio_fiscal || '';
+
                 setFormData(prev => ({
                     ...prev,
-                    razon_social: data.razon_social || data.nombre || '',
-                    direccion: data.direccion || '',
+                    razon_social: data.razon_social || data.nombre || prev.razon_social,
+                    estado: data.estado || '',
+                    condicion: data.condicion || '',
+                    tipo_contribuyente: data.tipo_contribuyente || data.tipo || '',
+                    departamento: data.departamento || '',
+                    provincia: data.provincia || '',
+                    distrito: data.distrito || '',
+                    ubigeo: data.ubigeo || data.ubigeo_sunat || '',
+                    direccion: direccion || prev.direccion,
+                    // Si la API no los devuelve, se conserva lo que ya estaba escrito
+                    telefono: data.telefono || prev.telefono,
+                    correo_electronico: data.correo_electronico || data.email || prev.correo_electronico,
+                    supervisor_empresa_nombre: data.representante_legal || data.representante || prev.supervisor_empresa_nombre,
                 }));
-                mostrarAlerta('¡Datos obtenidos correctamente de SUNAT!', 'success');
+
+                const resumen = data.estado ? ` (${data.estado}${data.condicion ? ' / ' + data.condicion : ''})` : '';
+                mostrarAlerta(`¡Datos obtenidos correctamente de SUNAT!${resumen}`, 'success');
             }
         } catch (error) {
             const mensajeError = error.response?.data?.error || 'No se encontró información para el RUC ingresado.';
             mostrarAlerta(mensajeError, 'error');
-            setEmpresaInfo(null);
         } finally {
             setBuscandoRuc(false);
         }
@@ -278,8 +303,7 @@ export default function Empresas() {
                 headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' }
             });
             mostrarAlerta('Empresa de convenio registrada exitosamente.', 'success');
-            setFormData({ ruc: '', razon_social: '', supervisor_empresa_nombre: '', telefono: '', correo_electronico: '', direccion: '' });
-            setEmpresaInfo(null);
+            setFormData(formularioVacio);
             cargarEmpresas();
         } catch (error) {
             mostrarAlerta('Error al registrar la empresa. Verifique los datos.', 'error');
@@ -296,7 +320,6 @@ export default function Empresas() {
     const cobertura = totalEmpresas ? Math.round((conEstudiantes / totalEmpresas) * 100) : 0;
 
     const series = useMemo(() => {
-        // Corregido a id_empresa
         const porId = [...lista].sort((a, b) => Number(a.id_empresa) - Number(b.id_empresa));
         let t = 0, p = 0;
         const sT = [], sP = [];
@@ -322,7 +345,7 @@ export default function Empresas() {
             const coincideTexto =
                 (emp.razon_social || '').toLowerCase().includes(texto) ||
                 String(emp.ruc || '').includes(texto) ||
-                (emp.supervisor_empresa_nombre || '').toLowerCase().includes(texto); // Corregido
+                (emp.supervisor_empresa_nombre || '').toLowerCase().includes(texto);
             const n = emp.estudiantes ? emp.estudiantes.length : 0;
             const coincideFiltro =
                 filtro === 'todas' || (filtro === 'con' && n > 0) || (filtro === 'sin' && n === 0);
@@ -346,8 +369,8 @@ export default function Empresas() {
     const exportarCSV = () => {
         const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
         const filas = [
-            ['RUC', 'Razón social', 'Supervisor / Representante', 'Teléfono', 'Correo', 'Dirección', 'Practicantes'],
-            ...filtradas.map(e => [e.ruc, e.razon_social, e.supervisor_empresa_nombre, e.telefono, e.correo_electronico, e.direccion, nEst(e)]),
+            ['RUC', 'Razón social', 'Estado', 'Condición', 'Departamento', 'Provincia', 'Distrito', 'Ubigeo', 'Supervisor / Representante', 'Teléfono', 'Correo', 'Dirección', 'Practicantes'],
+            ...filtradas.map(e => [e.ruc, e.razon_social, e.estado, e.condicion, e.departamento, e.provincia, e.distrito, e.ubigeo, e.supervisor_empresa_nombre, e.telefono, e.correo_electronico, e.direccion, nEst(e)]),
         ];
         const csv = '\uFEFF' + filas.map(f => f.map(esc).join(',')).join('\n');
         const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
@@ -488,7 +511,7 @@ export default function Empresas() {
                                                 type="text"
                                                 maxLength="11"
                                                 value={formData.ruc}
-                                                onChange={(e) => setFormData({ ...formData, ruc: e.target.value })}
+                                                onChange={cambiarCampo('ruc')}
                                                 placeholder="Ej. 20100047218"
                                                 className={claseInput}
                                                 required
@@ -516,7 +539,7 @@ export default function Empresas() {
                                             <input
                                                 type="text"
                                                 value={formData.razon_social}
-                                                onChange={(e) => setFormData({ ...formData, razon_social: e.target.value })}
+                                                onChange={cambiarCampo('razon_social')}
                                                 placeholder="Se completa automáticamente o ingrese manual"
                                                 className={claseInput}
                                                 required
@@ -525,40 +548,89 @@ export default function Empresas() {
                                     </div>
                                 </div>
 
-                                {empresaInfo && (
-                                    <div className="em-pop relative overflow-hidden p-5 bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 text-white rounded-2xl shadow-lg border border-blue-500/20">
-                                        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-blue-500/10 blur-2xl pointer-events-none" />
-                                        <div className="relative flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-blue-800/50">
-                                            <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider px-2.5 py-1 bg-blue-600/40 text-blue-100 rounded-md font-bold">
-                                                <IconShieldCheck />
-                                                Verificación SUNAT (Decolecta)
-                                            </span>
-                                            <div className="flex gap-2">
-                                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                                                    empresaInfo.estado === 'ACTIVO' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
-                                                }`}>
-                                                    ● {empresaInfo.estado || 'REGISTRADO'}
-                                                </span>
-                                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/20 text-sky-300">
-                                                    {empresaInfo.condicion || 'HABIDO'}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div className="relative grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 text-xs text-blue-50">
-                                            <div className="space-y-1"><span className="text-blue-300/80 block text-[10px] uppercase tracking-wider font-semibold">RUC</span><span className="font-mono">{empresaInfo.numero_documento}</span></div>
-                                            <div className="space-y-1"><span className="text-blue-300/80 block text-[10px] uppercase tracking-wider font-semibold">Ubicación</span>{empresaInfo.departamento} / {empresaInfo.provincia}</div>
-                                            <div className="space-y-1"><span className="text-blue-300/80 block text-[10px] uppercase tracking-wider font-semibold">Distrito</span>{empresaInfo.distrito || 'N/D'}</div>
-                                            <div className="space-y-1 min-w-0"><span className="text-blue-300/80 block text-[10px] uppercase tracking-wider font-semibold">Dirección</span><span className="block truncate" title={empresaInfo.direccion}>{empresaInfo.direccion}</span></div>
-                                        </div>
-                                    </div>
-                                )}
+                                {/* Datos SUNAT: estado, condición y tipo */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                    <Campo
+                                        label="Estado del contribuyente"
+                                        extra={formData.estado && (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600"><IconShieldCheck /> SUNAT</span>
+                                        )}
+                                    >
+                                        <input
+                                            type="text"
+                                            value={formData.estado}
+                                            onChange={cambiarCampo('estado')}
+                                            placeholder="Ej. ACTIVO"
+                                            className={`${claseInput} ${formData.estado === 'ACTIVO' ? 'text-emerald-700 font-semibold' : formData.estado ? 'text-rose-700 font-semibold' : ''}`}
+                                        />
+                                    </Campo>
+                                    <Campo label="Condición">
+                                        <input
+                                            type="text"
+                                            value={formData.condicion}
+                                            onChange={cambiarCampo('condicion')}
+                                            placeholder="Ej. HABIDO"
+                                            className={`${claseInput} ${formData.condicion === 'HABIDO' ? 'text-sky-700 font-semibold' : formData.condicion ? 'text-rose-700 font-semibold' : ''}`}
+                                        />
+                                    </Campo>
+                                    <Campo label="Tipo de contribuyente">
+                                        <input
+                                            type="text"
+                                            value={formData.tipo_contribuyente}
+                                            onChange={cambiarCampo('tipo_contribuyente')}
+                                            placeholder="Ej. SOCIEDAD ANONIMA"
+                                            className={claseInput}
+                                        />
+                                    </Campo>
+                                </div>
+
+                                {/* Ubicación */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
+                                    <Campo label="Departamento">
+                                        <input
+                                            type="text"
+                                            value={formData.departamento}
+                                            onChange={cambiarCampo('departamento')}
+                                            placeholder="Ej. LIMA"
+                                            className={claseInput}
+                                        />
+                                    </Campo>
+                                    <Campo label="Provincia">
+                                        <input
+                                            type="text"
+                                            value={formData.provincia}
+                                            onChange={cambiarCampo('provincia')}
+                                            placeholder="Ej. LIMA"
+                                            className={claseInput}
+                                        />
+                                    </Campo>
+                                    <Campo label="Distrito">
+                                        <input
+                                            type="text"
+                                            value={formData.distrito}
+                                            onChange={cambiarCampo('distrito')}
+                                            placeholder="Ej. MIRAFLORES"
+                                            className={claseInput}
+                                        />
+                                    </Campo>
+                                    <Campo label="Ubigeo">
+                                        <input
+                                            type="text"
+                                            maxLength="6"
+                                            value={formData.ubigeo}
+                                            onChange={cambiarCampo('ubigeo')}
+                                            placeholder="Ej. 150122"
+                                            className={`${claseInput} font-mono`}
+                                        />
+                                    </Campo>
+                                </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                                     <Campo label="Supervisor / Representante">
                                         <input
                                             type="text"
                                             value={formData.supervisor_empresa_nombre}
-                                            onChange={(e) => setFormData({ ...formData, supervisor_empresa_nombre: e.target.value })}
+                                            onChange={cambiarCampo('supervisor_empresa_nombre')}
                                             placeholder="Nombre del responsable"
                                             className={claseInput}
                                         />
@@ -567,7 +639,7 @@ export default function Empresas() {
                                         <input
                                             type="text"
                                             value={formData.telefono}
-                                            onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                                            onChange={cambiarCampo('telefono')}
                                             placeholder="Celular o contacto"
                                             className={claseInput}
                                         />
@@ -576,7 +648,7 @@ export default function Empresas() {
                                         <input
                                             type="email"
                                             value={formData.correo_electronico}
-                                            onChange={(e) => setFormData({ ...formData, correo_electronico: e.target.value })}
+                                            onChange={cambiarCampo('correo_electronico')}
                                             placeholder="correo@empresa.com"
                                             className={claseInput}
                                         />
@@ -587,7 +659,7 @@ export default function Empresas() {
                                     <input
                                         type="text"
                                         value={formData.direccion}
-                                        onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
+                                        onChange={cambiarCampo('direccion')}
                                         placeholder="Dirección completa de la empresa"
                                         className={claseInput}
                                     />
@@ -673,6 +745,7 @@ export default function Empresas() {
                                     ) : pagina_.length > 0 ? (
                                         pagina_.map((emp, i) => {
                                             const est = emp.estudiantes || [];
+                                            const zona = [emp.distrito, emp.provincia, emp.departamento].filter(Boolean).join(' / ');
                                             return (
                                                 <tr
                                                     key={emp.id_empresa}
@@ -686,7 +759,15 @@ export default function Empresas() {
                                                             </div>
                                                             <div className="space-y-1 min-w-0">
                                                                 <p className="font-semibold text-slate-900 leading-tight">{emp.razon_social}</p>
-                                                                <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-mono font-semibold rounded">RUC {emp.ruc}</span>
+                                                                <div className="flex flex-wrap items-center gap-1.5">
+                                                                    <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-mono font-semibold rounded">RUC {emp.ruc}</span>
+                                                                    {emp.estado && (
+                                                                        <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${emp.estado === 'ACTIVO' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{emp.estado}</span>
+                                                                    )}
+                                                                    {emp.condicion && (
+                                                                        <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${emp.condicion === 'HABIDO' ? 'bg-sky-50 text-sky-700' : 'bg-rose-50 text-rose-700'}`}>{emp.condicion}</span>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </td>
@@ -702,7 +783,10 @@ export default function Empresas() {
                                                     <td className="py-4 px-6">
                                                         <p className="flex items-start gap-1.5 text-xs text-slate-600 max-w-[240px]">
                                                             <span className="mt-0.5 text-slate-400 shrink-0"><IconPin /></span>
-                                                            <span className="line-clamp-2" title={emp.direccion}>{emp.direccion || 'Sin dirección'}</span>
+                                                            <span className="min-w-0">
+                                                                <span className="line-clamp-2 block" title={emp.direccion}>{emp.direccion || 'Sin dirección'}</span>
+                                                                {zona && <span className="block text-[11px] text-slate-400 mt-0.5">{zona}{emp.ubigeo ? ` · ${emp.ubigeo}` : ''}</span>}
+                                                            </span>
                                                         </p>
                                                     </td>
                                                     <td className="py-4 px-6">

@@ -58,51 +58,53 @@ class EmpresaController extends Controller
     }
 
     public function consultarRuc($ruc)
-    {
-        $ruc = preg_replace('/\D/', '', trim($ruc));
+{
+    $ruc = preg_replace('/\D/', '', trim($ruc));
 
-        if (strlen($ruc) !== 11) {
-            return response()->json(['error' => 'El RUC debe tener exactamente 11 dígitos.'], 400);
-        }
-
-        $url = 'https://api.decolecta.com/v1/sunat/ruc?numero=' . $ruc;
-        $token = 'sk_21694.PFZ3EPG494f3cEQfQB8iCSMvMUKKayHw';
-
-        $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_TIMEOUT => 15,
-            CURLOPT_HTTPHEADER => [
-                'Accept: application/json',
-                'Authorization: Bearer ' . $token
-            ],
-            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-        ]);
-
-        $response = curl_exec($curl);
-        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($curl);
-        curl_close($curl);
-
-        if ($curlError) {
-            return response()->json(['error' => 'Error de conexión con el servicio externo: ' . $curlError], 500);
-        }
-
-        if ($httpCode !== 200) {
-            return response()->json([
-                'error' => 'No se pudo obtener información de la SUNAT (Código HTTP: ' . $httpCode . ')',
-                'detalles' => json_decode($response, true) ?? $response
-            ], $httpCode);
-        }
-
-        $data = json_decode($response, true);
-        if (!$data) {
-            return response()->json(['error' => 'Respuesta no procesable del servicio externo.'], 500);
-        }
-
-        return response()->json($data, 200);
+    if (strlen($ruc) !== 11) {
+        return response()->json(['error' => 'El RUC debe tener exactamente 11 dígitos.'], 400);
     }
+
+    $url = 'https://api.decolecta.com/v1/sunat/ruc?numero=' . $ruc;
+    
+    // Leemos el token de forma segura desde el archivo .env
+    $token = env('SUNAT_API_TOKEN');
+
+    $curl = curl_init();
+    curl_setopt_array($curl, [
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_HTTPHEADER => [
+            'Accept: application/json',
+            'Authorization: Bearer ' . $token
+        ],
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    ]);
+
+    $response = curl_exec($curl);
+    $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($curl);
+    curl_close($curl);
+
+    if ($curlError) {
+        return response()->json(['error' => 'Error de conexión con el servicio externo: ' . $curlError], 500);
+    }
+
+    if ($httpCode !== 200) {
+        return response()->json([
+            'error' => 'No se pudo obtener información de la SUNAT (Código HTTP: ' . $httpCode . ')',
+            'detalles' => json_decode($response, true) ?? $response
+        ], $httpCode);
+    }
+
+    $data = json_decode($response, true);
+    if (!$data) {
+        return response()->json(['error' => 'Respuesta no procesable del servicio externo.'], 500);
+    }
+
+    return response()->json($data, 200);
+}
 }

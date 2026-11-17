@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http; // <-- Importación correcta arriba del todo
 
 class EstudianteController extends Controller
 {
@@ -53,7 +54,7 @@ class EstudianteController extends Controller
             'telefono' => 'nullable|string|max:15',
             'programa_estudios' => 'nullable|string|max:255',
             'semestre' => 'nullable|string|max:50',
-            'estado' => 'nullable|string|max:50', // Añadido para controlar estados (En progreso, Egresado, etc.)
+            'estado' => 'nullable|string|max:50', 
         ]);
 
         $estudiante = Estudiante::create($validated);
@@ -107,7 +108,7 @@ class EstudianteController extends Controller
             'telefono' => 'nullable|string|max:15',
             'programa_estudios' => 'nullable|string|max:255',
             'semestre' => 'nullable|string|max:50',
-            'estado' => 'sometimes|string|max:50', // Sincronizado para actualizar estados desde el panel
+            'estado' => 'sometimes|string|max:50',
         ]);
 
         $estudiante->update($validated);
@@ -139,5 +140,58 @@ class EstudianteController extends Controller
             'success' => true,
             'message' => 'Estudiante eliminado correctamente'
         ], 200);
+    }
+
+    /**
+     * Consultar DNI en la API externa (RENIEC / Decolecta)
+     */
+    public function consultarDni($dni)
+    {
+        // Limpiamos el DNI para asegurar que solo sean números y tenga 8 dígitos
+        $dni = preg_replace('/\D/', '', trim($dni));
+
+        if (strlen($dni) !== 8) {
+            return response()->json(['error' => 'El DNI debe tener exactamente 8 dígitos.'], 400);
+        }
+
+        $url = 'https://api.decolecta.com/v1/reniec/dni?numero=' . $dni;
+        $token = env('SUNAT_API_TOKEN'); 
+
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'Authorization: Bearer ' . $token
+            ],
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        ]);
+
+        $response = curl_exec($curl);
+        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($curl);
+        curl_close($curl);
+
+        if ($curlError) {
+            return response()->json(['error' => 'Error de conexión con el servicio externo: ' . $curlError], 500);
+        }
+
+        if ($httpCode !== 200) {
+            return response()->json([
+                'error' => 'No se pudo obtener información de la RENIEC (Código HTTP: ' . $httpCode . ')',
+                'detalles' => json_decode($response, true) ?? $response
+            ], $httpCode);
+        }
+
+        $data = json_decode($response, true);
+        if (!$data) {
+            return response()->json(['error' => 'Respuesta no procesable del servicio externo.'], 500);
+        }
+
+        return response()->json($data, 200);
     }
 }

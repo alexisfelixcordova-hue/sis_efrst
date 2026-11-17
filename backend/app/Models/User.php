@@ -41,4 +41,10 @@ class User extends Authenticatable
     {
         return $this->contrasena_hash;
     }
+
+    // Relación con la tabla roles
+    public function rol()
+    {
+        return $this->belongsTo(Role::class, 'id_rol', 'id_rol');
+    }
 }
