@@ -1,26 +1,36 @@
+
 import { useState, useEffect } from "react";
 
 import Navbar from "./componentes/Layout/Navbar.jsx";
 import Sidebar from "./componentes/Layout/Sidebar.jsx";
+
 import Dashboard from "./componentes/vistas/Dashboard.jsx";
 import Estudiantes from "./componentes/vistas/Estudiantes/Estudiantes.jsx";
+import ExpedienteAlumno from "./componentes/vistas/Estudiantes/ExpedienteAlumno.jsx";
+
 import PlantelDocente from "./componentes/vistas/Docente/Planteldocente.jsx";
 import FichaDocente from "./componentes/vistas/Docente/Fichadocente.jsx";
 import MisAlumnos from "./componentes/vistas/Docente/MisAlumnos.jsx";
+
 import Constancias from "./componentes/vistas/Constancias/Constancias.jsx";
 import VistaConstanciaPDF from "./componentes/vistas/Constancias/VistaConstanciaPDF.jsx";
 import Credenciales from "./componentes/vistas/Credenciales/Credenciales.jsx";
+
 import Login from "./componentes/Logout/Login.jsx";
 import Notfound from "./componentes/Error/404.jsx";
-import ExpedienteAlumno from "./componentes/vistas/Estudiantes/ExpedienteAlumno.jsx";
+
 import Asistente from "./componentes/vistas/Asistente/Asistente.jsx";
-import Revisiones from "./componentes/vistas/Revisiones/Revisiones.jsx";
 import Empresas from "./componentes/vistas/Empresa/Empresas.jsx";
+import EmpresasAsignadas from "./componentes/vistas/Empresa/EmpresasAsignadas.jsx";
 import Reportes from "./componentes/vistas/Reportes/Reportes.jsx";
+
 import AgregarUsuario from "./componentes/Users/AgregarUsuario.jsx";
 import ListaUsuario from "./componentes/Users/ListaUsuario.jsx";
 
-// --- Apps ---
+import RevisionExpedientes from "./componentes/vistas/Revisiones/RevisionExpedientes.jsx";
+import EvaluacionEvidencias from "./componentes/vistas/Evidencias/EvaluacionEvidencias.jsx";
+
+// Apps
 import Calendario from "./componentes/Apps/Calendario/Calendario.jsx";
 import Notas from "./componentes/Apps/Notas/Notas.jsx";
 import Projects from "./componentes/Apps/Projects/Projects.jsx";
@@ -38,11 +48,8 @@ function App() {
 
   const [autenticado, setAutenticado] = useState(false);
   const [cargandoSesion, setCargandoSesion] = useState(true);
-  
-  // Estado para mantener al usuario fresco directamente desde la base de datos
   const [usuarioBD, setUsuarioBD] = useState(null);
 
-  // Verificamos y sincronizamos el perfil fresco desde la base de datos al iniciar o recargar
   useEffect(() => {
     const verificarSesionBD = async () => {
       const token = localStorage.getItem("token");
@@ -59,19 +66,17 @@ function App() {
           method: "GET",
           headers: {
             Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-          },
+            Accept: "application/json"
+          }
         });
 
         const data = await res.json();
 
         if (res.ok && data.success) {
-          // Guardamos el usuario fresco directamente en el estado de React y opcionalmente en caché local solo como respaldo de sesión
           setUsuarioBD(data.data);
           localStorage.setItem("user", JSON.stringify(data.data));
           setAutenticado(true);
         } else {
-          // Si el token expiró o no es válido, limpiamos la sesión
           localStorage.removeItem("token");
           localStorage.removeItem("user");
           setUsuarioBD(null);
@@ -113,11 +118,16 @@ function App() {
   const cerrarSesion = () => {
     fetch(`${API}/logout`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}`, Accept: "application/json" },
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
+        Accept: "application/json"
+      }
     }).catch(() => {});
+
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     sessionStorage.clear();
+
     setEstudianteSeleccionado(null);
     setDocenteSeleccionado(null);
     setConstanciaSeleccionada(null);
@@ -138,7 +148,8 @@ function App() {
         return <Credenciales estudiante={estudianteSeleccionado} />;
 
       case "Revisiones":
-        return <Revisiones darkMode={darkMode} />;
+      case "Revisión de Expedientes":
+        return <RevisionExpedientes darkMode={darkMode} />;
 
       case "Reportes":
         return <Reportes darkMode={darkMode} />;
@@ -155,35 +166,81 @@ function App() {
       case "MisAlumnos":
         return <MisAlumnos darkMode={darkMode} />;
 
+      case "Evaluación de Evidencias":
+        return <EvaluacionEvidencias darkMode={darkMode} />;
+
+      case "Empresas Asignadas":
+        return <EmpresasAsignadas darkMode={darkMode} />;
+
       case "Asesores":
-        return <PlantelDocente onVerFicha={abrirFichaDocente} darkMode={darkMode} />;
+        return (
+          <PlantelDocente
+            onVerFicha={abrirFichaDocente}
+            darkMode={darkMode}
+          />
+        );
 
       case "Ficha Docente":
-        return <FichaDocente docente={docenteSeleccionado} onVolver={() => setVista("Asesores")} darkMode={darkMode} />;
+        return (
+          <FichaDocente
+            docente={docenteSeleccionado}
+            onVolver={() => setVista("Asesores")}
+            darkMode={darkMode}
+          />
+        );
 
       case "Ficha Estudiante":
-        return <Estudiantes estudianteSeleccionado={estudianteSeleccionado} onVerEstudiante={abrirFichaEstudiante} />;
+        return (
+          <Estudiantes
+            estudianteSeleccionado={estudianteSeleccionado}
+            onVerEstudiante={abrirFichaEstudiante}
+          />
+        );
 
       case "Constancias":
-        return <Constancias estudiante={constanciaSeleccionada} onVerConstancia={abrirVistaConstancia} />;
+        return (
+          <Constancias
+            estudiante={constanciaSeleccionada}
+            onVerConstancia={abrirVistaConstancia}
+          />
+        );
 
       case "Vista Constancia PDF":
-        return <VistaConstanciaPDF estudiante={constanciaSeleccionada} onVolver={() => setVista("Constancias")} />;
+        return (
+          <VistaConstanciaPDF
+            estudiante={constanciaSeleccionada}
+            onVolver={() => setVista("Constancias")}
+          />
+        );
 
       case "Expediente Alumno":
-        return <ExpedienteAlumno estudiante={estudianteSeleccionado} onVolver={() => setVista("Estudiantes")} darkMode={darkMode} />;
+        return (
+          <ExpedienteAlumno
+            estudiante={estudianteSeleccionado}
+            onVolver={() => setVista("Estudiantes")}
+            darkMode={darkMode}
+          />
+        );
 
-      // --- Usuarios ---
+      // Usuarios
       case "Usuarios":
       case "Lista de Usuarios":
       case "ListaUsuario":
-        return <ListaUsuario onIrCrear={() => setVista("AgregarUsuario")} />;
+        return (
+          <ListaUsuario
+            onIrCrear={() => setVista("AgregarUsuario")}
+          />
+        );
 
       case "AgregarUsuario":
       case "Crear Usuario":
-        return <AgregarUsuario onVolver={() => setVista("Usuarios")} />;
+        return (
+          <AgregarUsuario
+            onVolver={() => setVista("Usuarios")}
+          />
+        );
 
-      // --- Apps ---
+      // Apps
       case "Notas":
         return <Notas darkMode={darkMode} />;
 
@@ -212,7 +269,9 @@ function App() {
       <div className="flex h-screen items-center justify-center bg-[#0f172a] text-white">
         <div className="text-center">
           <div className="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-          <p className="text-sm font-semibold tracking-wider">Sincronizando con WORLDNIC...</p>
+          <p className="text-sm font-semibold tracking-wider">
+            Sincronizando con WORLDNIC...
+          </p>
         </div>
       </div>
     );
@@ -224,30 +283,42 @@ function App() {
         onLogin={async (datos) => {
           const res = await fetch(`${API}/login`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json"
+            },
             body: JSON.stringify({
               correo: datos.correo ?? datos.email ?? datos.usuario,
-              password: datos.password ?? datos.contrasena,
-            }),
+              password: datos.password ?? datos.contrasena
+            })
           });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data.success) throw new Error(data.message || "Credenciales incorrectas");
 
-          // Guardamos únicamente el token de acceso seguro
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "Credenciales incorrectas");
+          }
+
           localStorage.setItem("token", data.access_token);
         }}
         onExito={async () => {
-          // Al autenticarse con éxito, consultamos de inmediato el perfil real de la base de datos
           const token = localStorage.getItem("token");
+
           if (token) {
             const res = await fetch(`${API}/perfil`, {
-              headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json"
+              }
             });
+
             const data = await res.json();
+
             if (res.ok && data.success) {
               setUsuarioBD(data.data);
             }
           }
+
           setAutenticado(true);
         }}
       />
@@ -257,10 +328,11 @@ function App() {
   return (
     <div
       className={`flex h-screen overflow-hidden ${
-        darkMode ? "bg-[#0f172a] text-white" : "bg-[#f5f8fc] text-[#172b4d]"
+        darkMode
+          ? "bg-[#0f172a] text-white"
+          : "bg-[#f5f8fc] text-[#172b4d]"
       }`}
     >
-      {/* Pasamos el usuario proveniente directamente de la base de datos al Sidebar */}
       <Sidebar
         vistaActual={vista}
         onCambiarVista={cambiarVista}

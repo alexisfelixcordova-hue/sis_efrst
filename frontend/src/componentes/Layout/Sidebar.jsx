@@ -49,14 +49,13 @@ function Sidebar({ darkMode, vistaActual, onCambiarVista, onCerrarSesion, usuari
 
   // ==========================================
   // MENÚ PRINCIPAL DEL DOCENTE (id_rol === 2)
-  // Nota: 'nombre' se ajusta a "Mis Alumnos" para conectar con App.jsx y la vista creada
   // ==========================================
   const menuDocentePrincipal = [
     { nombre: "Dashboard", icono: LayoutDashboard },
     { nombre: "Perfil", icono: User },
-    { nombre: "Mis Alumnos", icono: GraduationCap },
-    { nombre: "Revisión de Expedientes", icono: FileCheck2 },
-    { nombre: "Evaluación de Evidencias", icono: ClipboardCheck },
+    { nombre: "Mis Alumnos", icono: GraduationCap },          // Vinculado al flujo de Gestión y Visualización
+    { nombre: "Revisión de Expedientes", icono: FileCheck2 },    // Vinculado al flujo de Evaluación y Revisión
+    { nombre: "Evaluación de Evidencias", icono: ClipboardCheck },// Vinculado al flujo de Calificación y Carga de Evidencias
     { nombre: "Empresas Asignadas", icono: Building2 },
     { nombre: "Reportes", icono: BarChart3 },
   ];
