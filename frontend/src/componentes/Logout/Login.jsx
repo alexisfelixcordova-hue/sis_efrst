@@ -1,7 +1,20 @@
-import { useState } from "react";
-import { User, Lock, Eye, EyeOff, ArrowRight, ChevronRight, Check } from "lucide-react";
+import { useState, useEffect } from "react";
+import { User, Lock, Eye, EyeOff, ArrowRight, ChevronRight, Check, AlertCircle, X } from "lucide-react";
 import fotoLogin from "../../assets/portada.jpeg";
+import LogoDiseño from "../../assets/LogoDiseño.png";
+import LogoInstituto from "../../assets/LogoInstituto.png";
+import LogoDiseño2 from "../../assets/LogoDiseño2.jpeg";
 import api from "../../api/axios"; // Ajusta la ruta según tu carpeta de Axios
+
+const DURACION_TOAST = 5000; // ms
+
+const estilosToast = `
+@keyframes lg-toast-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes lg-toast-bar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.lg-toast-in { animation: lg-toast-in .35s cubic-bezier(.22,1,.36,1) both; }
+.lg-toast-bar { transform-origin: left; animation: lg-toast-bar ${DURACION_TOAST}ms linear forwards; }
+@media (prefers-reduced-motion: reduce) { .lg-toast-in, .lg-toast-bar { animation: none !important; } }
+`;
 
 export default function Login({ foto = fotoLogin, onExito }) {
   const [abierto, setAbierto] = useState(false);
@@ -10,37 +23,43 @@ export default function Login({ foto = fotoLogin, onExito }) {
   const [ver, setVer] = useState(false);
   const [recordar, setRecordar] = useState(true);
   const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState("");
+  // Toast: { id, mensaje } — el id reinicia la animación si el error se repite
+  const [toast, setToast] = useState(null);
 
- const enviar = async (e) => {
+  // Se cierra solo después de unos segundos
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), DURACION_TOAST);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const enviar = async (e) => {
     e.preventDefault();
-    setError("");
+    setToast(null);
     setCargando(true);
 
     try {
-     
       const response = await api.post("/login", {
-        correo: correo,      // <--- Corregido de 'email' a 'correo'
+        correo: correo,
         password: password,
       });
 
-      // 2. Extraer y almacenar el token usando 'access_token' (lo que devuelve tu Laravel)
-      const token = response.data.access_token; // <--- Corregido de .token a .access_token
-      
+      const token = response.data.access_token;
+
       if (recordar) {
         localStorage.setItem("token", token);
       } else {
         sessionStorage.setItem("token", token);
       }
 
-      // 3. Callback de éxito
       if (onExito) {
         onExito(response.data);
       }
     } catch (err) {
-      setError(
-        err?.response?.data?.message || "Correo o contraseña incorrectos."
-      );
+      setToast({
+        id: Date.now(),
+        mensaje: err?.response?.data?.message || "Correo o contraseña incorrectos.",
+      });
     } finally {
       setCargando(false);
     }
@@ -51,6 +70,39 @@ export default function Login({ foto = fotoLogin, onExito }) {
 
   return (
     <div className="[--z:2] [zoom:var(--z)] relative h-[calc(100dvh/var(--z))] w-[calc(100vw/var(--z))] overflow-hidden bg-white font-['Plus_Jakarta_Sans',Inter,system-ui,sans-serif] text-[#0f172a]">
+      <style>{estilosToast}</style>
+
+      {/* ===== MENSAJE FLOTANTE DE ERROR (esquina superior derecha) ===== */}
+      {toast && (
+        <div
+          key={toast.id}
+          role="alert"
+          aria-live="assertive"
+          className="lg-toast-in absolute right-[10px] top-[10px] z-50 w-[150px] overflow-hidden rounded-[7px] border border-[#fecaca] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.14)]"
+        >
+          <div className="flex items-start gap-[6px] border-l-[3px] border-l-[#dc2626] px-[8px] py-[7px]">
+            <AlertCircle size={10} className="mt-[1px] shrink-0 text-[#dc2626]" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[6.6px] font-bold leading-tight text-[#0f172a]">
+                No se pudo iniciar sesión
+              </p>
+              <p className="mt-[2px] text-[6px] leading-snug text-[#64748b]">{toast.mensaje}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              aria-label="Cerrar mensaje"
+              className="shrink-0 rounded-[3px] p-[1px] text-[#94a3b8] hover:bg-slate-100 hover:text-[#475569]"
+            >
+              <X size={7} />
+            </button>
+          </div>
+          <div className="h-[1.5px] w-full bg-[#fee2e2]">
+            <div className="lg-toast-bar h-full w-full bg-[#dc2626]" />
+          </div>
+        </div>
+      )}
+
       {/* ===== FOTO (pantalla completa → mitad izquierda) ===== */}
       <div
         onClick={() => !abierto && setAbierto(true)}
@@ -70,15 +122,17 @@ export default function Login({ foto = fotoLogin, onExito }) {
 
         {/* Texto de la pantalla inicial */}
         <div
-          className={`absolute inset-0 flex flex-col items-center justify-end bg-gradient-to-t from-[#0b1b3a]/90 via-[#0b1b3a]/40 to-transparent pb-[150px] text-center text-white transition-opacity ${
+          className={`absolute inset-0 flex flex-col items-center justify-end bg-gradient-to-t from-[#0b1b3a]/90 via-[#0b1b3a]/40 to-transparent pb-[100px] text-center text-white transition-opacity ${
             abierto
               ? "pointer-events-none opacity-0 duration-300"
               : "opacity-100 delay-300 duration-700"
           }`}
         >
-          <span className="grid h-[26px] w-[26px] place-items-center rounded-[7px] bg-[#2563eb] text-[12px] font-extrabold">
-            W
-          </span>
+          <img
+            src={LogoDiseño}
+            alt="Logo WORLDNIC"
+            className="h-[70px] w-[70px] rounded-[7px]  object-contain p-[3px] "
+          />
           <p className="mt-[8px] text-[6px] font-bold uppercase tracking-[0.25em] text-white/70">
             Portal EFSRT
           </p>
@@ -86,7 +140,7 @@ export default function Login({ foto = fotoLogin, onExito }) {
             Experiencias Formativas en Situaciones Reales de Trabajo
           </h1>
           <p className="mt-[6px] text-[7.5px] text-white/75">
-            Sistema de control y seguimiento institucional · WORLDNIC
+            Sistema de control y seguimiento institucional ·
           </p>
           <span className="mt-[16px] inline-flex h-[24px] animate-pulse items-center gap-[5px] rounded-full border border-white/40 bg-white/10 px-[14px] text-[7.5px] font-semibold backdrop-blur">
             Haz clic para continuar <ArrowRight size={9} />
@@ -102,13 +156,15 @@ export default function Login({ foto = fotoLogin, onExito }) {
             : "pointer-events-none translate-x-[30px] opacity-0"
         }`}
       >
-        <div className="mx-auto w-full max-w-[233px]">
+        <div className="mx-auto w-full max-w-[243px]">
           {/* Marca + Ver foto */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-[7px]">
-              <span className="grid h-[26px] w-[26px] place-items-center rounded-[7px] bg-[#2563eb] text-[12px] font-extrabold text-white shadow-[0_3px_8px_rgba(37,99,235,0.35)]">
-                W
-              </span>
+              <img
+                src={LogoInstituto}
+                alt="Logo WORLDNIC"
+                className="h-[55px] w-[55px] rounded-[7px] object-contain  "
+              />
               <div className="leading-none">
                 <p className="text-[10px] font-extrabold tracking-tight">WORLDNIC</p>
                 <p className="mt-[3px] text-[5.2px] font-bold uppercase tracking-[0.08em] text-[#64748b]">
@@ -198,12 +254,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
                 ¿Olvidaste tu contraseña?
               </button>
             </div>
-
-            {error && (
-              <p role="alert" className="mt-[8px] rounded-[5px] border border-red-200 bg-red-50 px-[7px] py-[4px] text-[6.2px] font-medium text-red-600">
-                {error}
-              </p>
-            )}
 
             <button
               type="submit"

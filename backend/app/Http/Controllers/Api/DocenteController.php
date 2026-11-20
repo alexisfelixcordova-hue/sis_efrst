@@ -78,23 +78,22 @@ class DocenteController extends Controller
             ->select('e.*')
             ->get()
             ->map(fn ($e) => [
-                'id_estudiante'      => $e->id_estudiante ?? $e->id ?? null,
-                'nombres'            => $e->nombres ?? '',
-                'apellidos'          => $e->apellidos ?? '',
-                'nombre'             => trim(($e->nombres ?? '') . ' ' . ($e->apellidos ?? '')),
-                'dni'                => $e->dni ?? null,
-                // Mapeo directo con las columnas de tu BD (programa_estudios y semestre)
-                'carrera'            => $e->programa_estudios ?? 'Diseño y Programación Web',
-                'ciclo'              => $e->semestre ?? 'VI Semestre',
-                'proyecto'           => $e->proyecto_titulo ?? $e->proyecto ?? 'Sistema Web EFSRT',
-                'entidad'            => $e->entidad_nombre ?? $e->entidad ?? 'Empresa Local',
-                'hrs'                => $e->horas_acumuladas ?? $e->hrs ?? 160,
-                'estado'             => $e->estado ?? 'Al día',
-                'correo'             => $e->correo ?? $e->email ?? 'No registrado',
-                'telefono'           => $e->telefono ?? 'No registrado',
-                'direccion'          => $e->direccion ?? 'No registrada',
-                'programa_estudios'  => $e->programa_estudios ?? 'Diseño y Programación Web',
-                'semestre'           => $e->semestre ?? 'VI Semestre',
+                'id_estudiante'     => $e->id_estudiante ?? $e->id ?? null,
+                'nombres'           => $e->nombres ?? '',
+                'apellidos'         => $e->apellidos ?? '',
+                'nombre'            => trim(($e->nombres ?? '') . ' ' . ($e->apellidos ?? '')),
+                'dni'               => $e->dni ?? null,
+                'carrera'           => $e->programa_estudios ?? 'Diseño y Programación Web',
+                'ciclo'             => $e->semestre ?? 'VI Semestre',
+                'proyecto'          => $e->proyecto_titulo ?? $e->proyecto ?? 'Sistema Web EFSRT',
+                'entidad'           => $e->entidad_nombre ?? $e->entidad ?? 'Empresa Local',
+                'hrs'               => $e->horas_acumuladas ?? $e->hrs ?? 160,
+                'estado'            => $e->estado ?? 'Al día',
+                'correo'            => $e->correo ?? $e->email ?? 'No registrado',
+                'telefono'          => $e->telefono ?? 'No registrado',
+                'direccion'         => $e->direccion ?? 'No registrada',
+                'programa_estudios' => $e->programa_estudios ?? 'Diseño y Programación Web',
+                'semestre'          => $e->semestre ?? 'VI Semestre',
             ]);
 
         $otros = DB::table('usuarios')
@@ -122,6 +121,130 @@ class DocenteController extends Controller
             'alumnos'       => $alumnos,
             'actividad'     => [],
             'otrosDocentes' => $otros,
+        ]);
+    }
+
+    /**
+     * Lista los IDs de estudiantes actualmente asignados a un docente (opcionalmente filtrado por módulo).
+     */
+    public function estudiantesAsignados(Request $request, $id)
+    {
+        $query = DB::table('asignacion_asesores')
+            ->where('id_docente', $id);
+
+        if ($request->filled('id_modulo') && Schema::hasColumn('asignacion_asesores', 'id_modulo')) {
+            $query->where('id_modulo', (int) $request->id_modulo);
+        }
+
+        if ($request->filled('periodo_academico') && Schema::hasColumn('asignacion_asesores', 'periodo_academico')) {
+            $query->where('periodo_academico', trim((string) $request->periodo_academico));
+        }
+
+        $ids = $query->pluck('id_estudiante');
+
+        return response()->json([
+            'data' => $ids,
+        ]);
+    }
+
+    /**
+     * Guarda o actualiza en lote los estudiantes asignados a un docente para un módulo y periodo.
+     */
+    public function asignarEstudiantes(Request $request, $id)
+    {
+        $request->validate([
+            'estudiantes'       => 'present|array',
+            'estudiantes.*'     => 'integer',
+            'id_modulo'         => 'required|integer',
+            'periodo_academico' => 'nullable|string|max:20',
+        ], [
+            'id_modulo.required' => 'Debes seleccionar un módulo profesional.',
+        ]);
+
+        $docenteExiste = DB::table('usuarios')
+            ->where('id_usuario', $id)
+            ->where('id_rol', 2)
+            ->exists();
+
+        if (!$docenteExiste) {
+            return response()->json([
+                'message' => 'El docente seleccionado no existe.',
+            ], 404);
+        }
+
+        $idsEstudiantes = array_values(array_unique(array_map('intval', $request->estudiantes)));
+        $idModulo       = (int) $request->input('id_modulo');
+        $periodo        = trim((string) ($request->input('periodo_academico') ?: '2026-II'));
+        $tienePeriodo   = Schema::hasColumn('asignacion_asesores', 'periodo_academico');
+        $tieneCreatedAt = Schema::hasColumn('asignacion_asesores', 'created_at');
+        $tieneUpdatedAt = Schema::hasColumn('asignacion_asesores', 'updated_at');
+
+        DB::transaction(function () use (
+            $id,
+            $idsEstudiantes,
+            $idModulo,
+            $periodo,
+            $tienePeriodo,
+            $tieneCreatedAt,
+            $tieneUpdatedAt
+        ) {
+            // 1. Elimina asignaciones actuales de este docente en el módulo (y periodo si aplica)
+            $borrarDocente = DB::table('asignacion_asesores')
+                ->where('id_docente', $id)
+                ->where('id_modulo', $idModulo);
+
+            if ($tienePeriodo) {
+                $borrarDocente->where('periodo_academico', $periodo);
+            }
+            $borrarDocente->delete();
+
+            // 2. Evita violar la restricción única uq_estudiante_modulo_periodo
+            if (!empty($idsEstudiantes)) {
+                $borrarConflictos = DB::table('asignacion_asesores')
+                    ->whereIn('id_estudiante', $idsEstudiantes)
+                    ->where('id_modulo', $idModulo);
+
+                if ($tienePeriodo) {
+                    $borrarConflictos->where('periodo_academico', $periodo);
+                }
+                $borrarConflictos->delete();
+
+                $ahora = now();
+                $filas = array_map(function ($idEstudiante) use (
+                    $id,
+                    $idModulo,
+                    $periodo,
+                    $tienePeriodo,
+                    $tieneCreatedAt,
+                    $tieneUpdatedAt,
+                    $ahora
+                ) {
+                    $fila = [
+                        'id_docente'    => (int) $id,
+                        'id_estudiante' => $idEstudiante,
+                        'id_modulo'     => $idModulo,
+                    ];
+
+                    if ($tienePeriodo) {
+                        $fila['periodo_academico'] = $periodo;
+                    }
+                    if ($tieneCreatedAt) {
+                        $fila['created_at'] = $ahora;
+                    }
+                    if ($tieneUpdatedAt) {
+                        $fila['updated_at'] = $ahora;
+                    }
+
+                    return $fila;
+                }, $idsEstudiantes);
+
+                DB::table('asignacion_asesores')->insert($filas);
+            }
+        });
+
+        return response()->json([
+            'message' => 'Estudiantes asignados correctamente.',
+            'total'   => count($idsEstudiantes),
         ]);
     }
 

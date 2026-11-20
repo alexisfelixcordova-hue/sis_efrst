@@ -1,4 +1,5 @@
 import React from "react";
+import logoInstituto from "../../assets/LogoInstituto.png";
 import {
   LayoutDashboard,
   User,
@@ -103,17 +104,21 @@ function Sidebar({ darkMode, vistaActual, onCambiarVista, onCerrarSesion, usuari
       } border-r flex flex-col p-4 select-none transition-all duration-300`}
     >
       {/* BRAND / LOGO */}
-      <div className="flex items-center justify-between pb-4 pt-1 px-2 border-b border-gray-200/50 dark:border-gray-700/50 mb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-sky-500/10 text-sky-500 rounded-xl flex items-center justify-center font-bold shadow-sm shrink-0 transition-transform duration-300 hover:rotate-6">
-            <Sparkles className="w-5 h-5 text-sky-500 animate-pulse" />
-          </div>
-          <span className="font-extrabold tracking-tight text-base truncate">
-            <span className={darkMode ? "text-white" : "text-slate-900"}>WORLD</span>
-            <span className="text-sky-500">NIC</span>
-          </span>
-        </div>
-      </div>
+      <div className="flex items-center justify-between pb-1.5 pt-0.5 px-1 border-b border-gray-200/50 dark:border-gray-700/50 mb-1.5">
+  <div className="flex items-center gap-2">
+    <div className="w-11 h-11 shrink-0">
+      <img
+        src={logoInstituto}
+        alt="Logo INSTITUTO"
+        className="w-full h-full object-contain animate-pulse"
+      />
+    </div>
+    <span className="font-extrabold tracking-tight text-base truncate">
+      <span className={darkMode ? "text-blue-300" : "text-[#0b1b3a]"}>ANDRES</span>
+      <span className={darkMode ? "text-rose-400" : "text-[#7f1d1d]"}>ACD</span>
+    </span>
+  </div>
+</div>
 
       {/* MENÚ NAVEGABLE */}
       <nav className="flex-1 space-y-4 overflow-y-auto pr-1">

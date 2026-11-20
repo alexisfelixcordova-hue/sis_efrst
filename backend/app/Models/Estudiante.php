@@ -18,7 +18,10 @@ class Estudiante extends Model
         'correo',
         'apellidos',
         'programa_estudios',
-        'semestre'
+        'semestre',
+        'telefono',
+        'estado',
+        'direccion',
     ];
 
     public function expedientes()

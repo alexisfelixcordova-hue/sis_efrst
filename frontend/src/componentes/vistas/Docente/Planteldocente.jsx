@@ -15,6 +15,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import api from "../../../api/axios";
+import ModalAsignarEstudiantes from "./componentes/ModalAsignarEstudiantes";
 
 const avatares = [
   "https://i.pravatar.cc/80?img=47",
@@ -30,12 +31,22 @@ const estadoEstilos = {
   "En Sesión": "bg-blue-50 text-blue-700 ring-blue-600/10",
 };
 
+const extraerLista = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.data?.data)) return payload.data.data;
+  return [];
+};
+
 export default function PlantelDocente({
   onVerFicha,
   onAsignarEstudiantes,
   darkMode = false,
 }) {
   const [docentes, setDocentes] = useState([]);
+  const [estudiantes, setEstudiantes] = useState([]);
+  const [modulosData, setModulosData] = useState([]);
+  const [listaModulos, setListaModulos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
 
@@ -45,7 +56,9 @@ export default function PlantelDocente({
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [soloDisponibles, setSoloDisponibles] = useState(false);
   const [pagina, setPagina] = useState(1);
-  const [listaModulos, setListaModulos] = useState([]);
+
+  const [modalAsignarAbierto, setModalAsignarAbierto] = useState(false);
+  const [docenteParaAsignar, setDocenteParaAsignar] = useState(null);
 
   const porPagina = 5;
 
@@ -57,12 +70,10 @@ export default function PlantelDocente({
         localStorage.getItem("access_token") || localStorage.getItem("token");
 
       const response = await api.get("/docentes", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
-      const resultado = response.data.data || response.data;
-      const lista = Array.isArray(resultado) ? resultado : [];
-
+      const lista = extraerLista(response.data);
       setDocentes(lista);
     } catch (err) {
       console.error("Error al cargar asesores:", err);
@@ -79,30 +90,65 @@ export default function PlantelDocente({
         localStorage.getItem("access_token") || localStorage.getItem("token");
 
       const response = await api.get("/modulos-profesionales", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
-      const resultado = response.data.data || response.data;
-      const nombres = (Array.isArray(resultado) ? resultado : [])
-        .map((m) => m.nombre ?? m.nombre_modulo ?? m.titulo ?? m.descripcion)
+      const arreglo = extraerLista(response.data);
+      setModulosData(arreglo);
+
+      const nombres = arreglo
+        .map(
+          (m) =>
+            m?.nombre ??
+            m?.nombre_modulo ??
+            m?.modulo ??
+            m?.titulo ??
+            m?.descripcion
+        )
         .filter(Boolean);
 
       setListaModulos([...new Set(nombres)]);
     } catch (err) {
       console.error("Error al cargar módulos:", err);
+      setModulosData([]);
       setListaModulos([]);
     }
   };
 
-  const actualizarTodo = () => {
-    obtenerDocentes();
-    obtenerModulos();
+  const obtenerEstudiantes = async () => {
+    try {
+      const token =
+        localStorage.getItem("access_token") || localStorage.getItem("token");
+
+      const response = await api.get("/estudiantes", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      const lista = extraerLista(response.data);
+      setEstudiantes(lista);
+    } catch (err) {
+      console.error("Error al cargar estudiantes:", err);
+      setEstudiantes([]);
+    }
+  };
+
+  const actualizarTodo = async () => {
+    await Promise.all([
+      obtenerDocentes(),
+      obtenerModulos(),
+      obtenerEstudiantes(),
+    ]);
   };
 
   useEffect(() => {
-    obtenerDocentes();
-    obtenerModulos();
+    actualizarTodo();
   }, []);
+
+  const abrirModalAsignar = (docente = null) => {
+    setDocenteParaAsignar(docente);
+    setModalAsignarAbierto(true);
+    onAsignarEstudiantes?.(docente);
+  };
 
   const especialidades = useMemo(() => {
     return [
@@ -118,15 +164,19 @@ export default function PlantelDocente({
   const filtrados = useMemo(() => {
     return docentes
       .filter((d) => {
-        const nombreCompleto = `${d.nombres || d.nombre || ""} ${d.apellidos || ""}`;
-        const texto =
-          `${nombreCompleto} ${d.correo || ""} ${d.departamento || ""} ${d.modulo || ""}`.toLowerCase();
+        const nombreCompleto = `${d.nombres || d.nombre || ""} ${
+          d.apellidos || ""
+        }`;
+        const texto = `${nombreCompleto} ${d.correo || ""} ${
+          d.departamento || ""
+        } ${d.modulo || ""}`.toLowerCase();
 
         return (
           texto.includes(busqueda.trim().toLowerCase()) &&
           (especialidad === "Todas las especialidades" ||
             d.departamento === especialidad) &&
-          (modulo === "Todos los Módulos EFSRT" || (d.modulos || []).includes(modulo)) &&
+          (modulo === "Todos los Módulos EFSRT" ||
+            (d.modulos || []).includes(modulo)) &&
           (!soloDisponibles || d.estado !== "Cupo Completo")
         );
       })
@@ -164,7 +214,8 @@ export default function PlantelDocente({
         texto: "text-slate-100",
         secundario: "text-slate-400",
         panel: "bg-[#1e293b] border-slate-700",
-        campo: "bg-[#0f172a] border-slate-700 text-slate-100 placeholder:text-slate-500",
+        campo:
+          "bg-[#0f172a] border-slate-700 text-slate-100 placeholder:text-slate-500",
         fila: "border-slate-700 hover:bg-slate-800/70",
         encabezado: "bg-slate-800/70 text-slate-300",
         tarjeta: "bg-[#1e293b] border-slate-700",
@@ -174,7 +225,8 @@ export default function PlantelDocente({
         texto: "text-slate-800",
         secundario: "text-slate-500",
         panel: "bg-white border-slate-200",
-        campo: "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400",
+        campo:
+          "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400",
         fila: "border-slate-100 hover:bg-slate-50",
         encabezado: "bg-slate-50 text-slate-500",
         tarjeta: "bg-white border-slate-200",
@@ -212,7 +264,9 @@ export default function PlantelDocente({
 
           <button
             type="button"
-            onClick={onAsignarEstudiantes}
+            onClick={() =>
+              abrirModalAsignar(filtrados[0] || docentes[0] || null)
+            }
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
           >
             <UserRoundPlus size={16} />
@@ -239,10 +293,14 @@ export default function PlantelDocente({
             <div className="rounded-lg bg-emerald-50 p-2.5 text-emerald-600">
               <UserCheck size={21} />
             </div>
-            <span className="text-xs font-medium text-emerald-600">Disponibles</span>
+            <span className="text-xs font-medium text-emerald-600">
+              Disponibles
+            </span>
           </div>
           <p className="mt-4 text-2xl font-bold">{totalDisponibles}</p>
-          <p className={`mt-1 text-sm ${tema.secundario}`}>Con cupo para asesorar</p>
+          <p className={`mt-1 text-sm ${tema.secundario}`}>
+            Con cupo para asesorar
+          </p>
         </div>
 
         <div className={`rounded-xl border p-5 ${tema.tarjeta}`}>
@@ -250,10 +308,14 @@ export default function PlantelDocente({
             <div className="rounded-lg bg-amber-50 p-2.5 text-amber-600">
               <BookOpen size={21} />
             </div>
-            <span className="text-xs font-medium text-amber-600">En sesión</span>
+            <span className="text-xs font-medium text-amber-600">
+              En sesión
+            </span>
           </div>
           <p className="mt-4 text-2xl font-bold">{totalEnSesion}</p>
-          <p className={`mt-1 text-sm ${tema.secundario}`}>Asesorando actualmente</p>
+          <p className={`mt-1 text-sm ${tema.secundario}`}>
+            Asesorando actualmente
+          </p>
         </div>
 
         <div className={`rounded-xl border p-5 ${tema.tarjeta}`}>
@@ -264,7 +326,9 @@ export default function PlantelDocente({
             <span className="text-xs font-medium text-violet-600">Alumnos</span>
           </div>
           <p className="mt-4 text-2xl font-bold">{totalAlumnos}</p>
-          <p className={`mt-1 text-sm ${tema.secundario}`}>Estudiantes a cargo</p>
+          <p className={`mt-1 text-sm ${tema.secundario}`}>
+            Estudiantes a cargo
+          </p>
         </div>
       </section>
 
@@ -275,7 +339,8 @@ export default function PlantelDocente({
             <div>
               <h2 className="text-lg font-bold">Listado de docentes</h2>
               <p className={`mt-1 text-sm ${tema.secundario}`}>
-                Busca docentes y accede a su ficha. Ordenado por mayor carga de alumnos.
+                Busca docentes y accede a su ficha. Ordenado por mayor carga de
+                alumnos.
               </p>
             </div>
             <span className={`text-sm ${tema.secundario}`}>
@@ -384,7 +449,10 @@ export default function PlantelDocente({
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-red-500">
+                  <td
+                    colSpan={6}
+                    className="px-5 py-12 text-center text-red-500"
+                  >
                     {error}
                   </td>
                 </tr>
@@ -561,6 +629,17 @@ export default function PlantelDocente({
           </div>
         </footer>
       </section>
+
+      <ModalAsignarEstudiantes
+        abierto={modalAsignarAbierto}
+        onCerrar={() => setModalAsignarAbierto(false)}
+        docentes={docentes}
+        docenteInicial={docenteParaAsignar}
+        estudiantes={estudiantes}
+        modulos={modulosData}
+        darkMode={darkMode}
+        onGuardadoExitoso={actualizarTodo}
+      />
     </main>
   );
 }

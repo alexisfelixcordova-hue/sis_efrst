@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\ExpedienteController;
 use App\Http\Controllers\Api\ModuloController;
 use App\Http\Controllers\Api\DocenteController;
 use App\Http\Controllers\Api\BusquedaGlobalController;
+use App\Http\Controllers\Api\ReporteController;
 
 // Rutas públicas
 Route::post('/login', [AuthController::class, 'login']);
@@ -72,12 +73,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // Docentes
     Route::get('/docentes', [DocenteController::class, 'index']);
     Route::get('/docentes/{id}', [DocenteController::class, 'show']);
+    Route::get('/docentes/{id}/estudiantes', [DocenteController::class, 'estudiantesAsignados']);
+    Route::post('/docentes/{id}/asignar-estudiantes', [DocenteController::class, 'asignarEstudiantes']);
 
     // Módulos profesionales
     Route::apiResource('modulos-profesionales', ModuloController::class);
 
     // Asignaciones de asesores
     Route::apiResource('asignaciones-asesores', AsignacionAsesorController::class);
+    Route::get('/mis-alumnos', [AsignacionAsesorController::class, 'misAlumnos']);
 
     // Evidencias
     Route::apiResource('evidencias', EvidenciaEfsrtController::class);
@@ -86,6 +90,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/constancias-efsrt', [ConstanciaEmitidaController::class, 'index']);
     Route::post('/constancias/generar', [ConstanciaEmitidaController::class, 'generar']);
     Route::apiResource('constancias', ConstanciaEmitidaController::class)->except(['store', 'update']);
+
+    // Reportes y estadísticas
+    Route::get('/reportes/estadisticas', [ReporteController::class, 'estadisticas']);
 
     // Asistente virtual (Gemini)
     Route::post('/asistente', [AsistenteController::class, 'chat']);

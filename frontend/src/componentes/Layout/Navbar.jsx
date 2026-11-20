@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Search, Bell, Maximize, Settings, ChevronRight, User, LogOut, Sun, Moon,
-  Check, Shield, GraduationCap, X, Building2, Sparkles, Hash, Mail
+  Check, Shield, GraduationCap, X, Sparkles, Hash, Mail
 } from 'lucide-react';
 import imagenPerfil from '../../assets/perfil.jpg';
 
@@ -28,7 +28,7 @@ function Navbar({
   onIrPerfil, onIrAjustes, onCerrarSesion,
 }) {
   const usuarioGuardado = usuario || JSON.parse(localStorage.getItem('user') || '{}');
-  
+
   const nombreUsuario = usuarioGuardado?.nombres || usuarioGuardado?.nombre || usuarioGuardado?.name || 'Usuario';
   const avatarUrl = imagenPerfil;
 
@@ -141,24 +141,44 @@ function Navbar({
   const leerNotif = (id) => setNotifs((l) => l.map((n) => (n.id === id ? { ...n, leida: true } : n)));
 
   const panel = `absolute top-full mt-2 z-50 rounded-xl border shadow-xl overflow-hidden backdrop-blur-md transition-all ${
-    darkMode ? 'bg-slate-900/95 border-slate-700 text-slate-200' : 'bg-white/95 border-slate-200 text-slate-700'
+    darkMode
+      ? 'bg-[#0b1b3a]/95 border-[#1e335c] text-slate-100'
+      : 'bg-white/95 border-slate-200 text-slate-700'
   }`;
 
-  // Estilo de fila limpio similar a notificaciones para los resultados de búsqueda
   const itemResultado = `w-full flex items-center gap-3 px-4 py-3 text-xs text-left outline-none transition-colors border-b ${
-    darkMode ? 'border-slate-800 hover:bg-slate-800/80 text-slate-200' : 'border-slate-100 hover:bg-slate-50 text-slate-700'
+    darkMode
+      ? 'border-[#16294f] hover:bg-[#13264c] text-slate-100'
+      : 'border-slate-100 hover:bg-slate-50 text-slate-700'
   }`;
 
-  const separador = darkMode ? 'border-slate-800' : 'border-slate-100';
+  const separador = darkMode ? 'border-[#1e335c]' : 'border-slate-100';
+
+  const botonIcono = `p-2.5 rounded-xl border outline-none transition-all ${
+    darkMode
+      ? 'bg-[#0f172a] border-[#1e335c] hover:bg-[#13264c] text-slate-200'
+      : 'border-slate-200 hover:bg-slate-50 text-slate-500'
+  }`;
 
   return (
     <>
-      <header className={`h-[65px] ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'} border-b px-6 flex items-center justify-between transition-colors duration-200 select-none`}>
-        
+      <header
+        className={`h-[65px] ${
+          darkMode
+            ? 'bg-[#0b1b3a] border-[#1e335c] text-white'
+            : 'bg-white border-slate-200 text-slate-800'
+        } border-b px-6 flex items-center justify-between transition-colors duration-200 select-none`}
+      >
         {/* Buscador Global con Recomendaciones por Atributo */}
         <div className="w-80 sm:w-96 relative" data-menu>
-          <div className={`relative flex items-center w-full rounded-xl border ${darkMode ? 'bg-slate-800/60 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'} px-3.5 py-2 transition-all focus-within:ring-2 focus-within:ring-sky-500/30 focus-within:border-sky-500`}>
-            <Search className="w-4 h-4 mr-2.5 text-slate-400 shrink-0" />
+          <div
+            className={`relative flex items-center w-full rounded-xl border ${
+              darkMode
+                ? 'bg-[#0f172a] border-[#1e335c] text-slate-100'
+                : 'bg-slate-50 border-slate-200 text-slate-700'
+            } px-3.5 py-2 transition-all focus-within:ring-2 focus-within:ring-[#0284c7]/30 focus-within:border-[#0284c7]`}
+          >
+            <Search className={`w-4 h-4 mr-2.5 shrink-0 ${darkMode ? 'text-[#38bdf8]' : 'text-slate-400'}`} />
             <input
               type="text"
               placeholder="Buscar por nombre, DNI, correo o rol..."
@@ -174,7 +194,7 @@ function Navbar({
               <button
                 type="button"
                 onClick={() => { setQuery(''); setResultados([]); }}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-1"
+                className="text-slate-400 hover:text-slate-200 ml-1"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -183,11 +203,15 @@ function Navbar({
 
           {/* Desplegable de Recomendaciones y Resultados */}
           {abierto === 'buscar' && (
-            <div className={`${panel} left-0 w-full max-h-80 overflow-y-auto shadow-2xl divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
+            <div
+              className={`${panel} left-0 w-full max-h-80 overflow-y-auto shadow-2xl divide-y ${
+                darkMode ? 'divide-[#16294f]' : 'divide-slate-100'
+              }`}
+            >
               {query.trim().length < 2 ? (
                 <div className="p-3 space-y-2">
                   <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    <Sparkles className="w-3 h-3 text-sky-500" />
+                    <Sparkles className="w-3 h-3 text-[#0284c7]" />
                     Recomendaciones por atributo
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 pt-1">
@@ -200,11 +224,11 @@ function Navbar({
                           onClick={() => aplicarRecomendacion(atr.prefijo)}
                           className={`flex items-start gap-2 p-2 rounded-lg border text-left transition-all ${
                             darkMode
-                              ? 'border-slate-800 bg-slate-800/40 hover:bg-slate-800 text-slate-200'
+                              ? 'border-[#1e335c] bg-[#0f172a] hover:bg-[#13264c] text-slate-100'
                               : 'border-slate-100 bg-slate-50/70 hover:bg-sky-50/70 hover:border-sky-200 text-slate-700'
                           }`}
                         >
-                          <IconoAtr className="w-3.5 h-3.5 text-sky-500 shrink-0 mt-0.5" />
+                          <IconoAtr className="w-3.5 h-3.5 text-[#0284c7] shrink-0 mt-0.5" />
                           <div className="min-w-0">
                             <p className="text-[11px] font-semibold truncate">{atr.etiqueta}</p>
                             <p className="text-[9.5px] text-slate-400 truncate">{atr.ejemplo}</p>
@@ -216,7 +240,11 @@ function Navbar({
                 </div>
               ) : (
                 <>
-                  <div className={`px-4 py-2.5 flex items-center justify-between text-[10px] font-semibold text-slate-400 bg-slate-50/50 dark:bg-slate-800/50`}>
+                  <div
+                    className={`px-4 py-2.5 flex items-center justify-between text-[10px] font-semibold text-slate-400 ${
+                      darkMode ? 'bg-[#0f172a]' : 'bg-slate-50/50'
+                    }`}
+                  >
                     <span>Resultados de búsqueda</span>
                     {resultados.length > 0 && <span>{resultados.length} encontrados</span>}
                   </div>
@@ -232,16 +260,17 @@ function Navbar({
                   )}
 
                   {!buscando && resultados.map((itemRes) => {
-                    const subtitulo = itemRes.dni ? `DNI: ${itemRes.dni}` : (itemRes.correo || itemRes.email || itemRes.especialidad || 'Registro académico');
+                    const subtitulo = itemRes.dni
+                      ? `DNI: ${itemRes.dni}`
+                      : (itemRes.correo || itemRes.email || itemRes.especialidad || 'Registro académico');
                     return (
                       <button
                         key={`${itemRes.tipo || 'reg'}-${itemRes.id || itemRes.id_estudiante || itemRes.id_docente}`}
                         onClick={() => seleccionarPersona(itemRes)}
                         className={itemResultado}
                       >
-                        {/* Indicador de estado / punto verde o icono institucional limpio */}
                         <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-400" />
-                        
+
                         <div className="flex-1 min-w-0 text-left leading-snug">
                           <p className="font-semibold text-current truncate">
                             {itemRes.nombres || itemRes.nombre || itemRes.razon_social} {itemRes.apellidos || ''}
@@ -251,11 +280,13 @@ function Navbar({
                           </p>
                         </div>
 
-                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase shrink-0 ${
-                          itemRes.tipo === 'docente'
-                            ? 'bg-sky-500/10 text-sky-500'
-                            : 'bg-emerald-500/10 text-emerald-500'
-                        }`}>
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase shrink-0 ${
+                            itemRes.tipo === 'docente'
+                              ? 'bg-[#0284c7]/20 text-[#38bdf8]'
+                              : 'bg-emerald-500/15 text-emerald-400'
+                          }`}
+                        >
                           {itemRes.tipo || 'Alumno'}
                         </span>
                       </button>
@@ -269,18 +300,26 @@ function Navbar({
 
         {/* Controles de la derecha */}
         <div className="flex items-center gap-3">
-          
+
           {/* Toggle Modo Claro / Oscuro */}
-          <div className={`flex items-center p-0.5 rounded-full border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
+          <div
+            className={`flex items-center p-0.5 rounded-full border ${
+              darkMode ? 'bg-[#0f172a] border-[#1e335c]' : 'bg-slate-100 border-slate-200'
+            }`}
+          >
             <button
               onClick={() => setDarkMode(false)}
-              className={`px-3.5 py-1.5 rounded-full text-[11px] font-semibold transition-all outline-none ${!darkMode ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`px-3.5 py-1.5 rounded-full text-[11px] font-semibold transition-all outline-none ${
+                !darkMode ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
               Luz
             </button>
             <button
               onClick={() => setDarkMode(true)}
-              className={`px-3.5 py-1.5 rounded-full text-[11px] font-semibold transition-all outline-none ${darkMode ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-400 hover:text-slate-800'}`}
+              className={`px-3.5 py-1.5 rounded-full text-[11px] font-semibold transition-all outline-none ${
+                darkMode ? 'bg-[#0284c7] text-white shadow-sm' : 'text-slate-400 hover:text-slate-800'
+              }`}
             >
               Oscuro
             </button>
@@ -291,10 +330,12 @@ function Navbar({
             <button
               onClick={() => alternar('notif')}
               className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border outline-none transition-all ${
-                darkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-sky-600'
+                darkMode
+                  ? 'bg-[#0f172a] border-[#1e335c] hover:bg-[#13264c] text-slate-100'
+                  : 'border-slate-200 hover:bg-slate-50 text-sky-600'
               }`}
             >
-              <Bell className="w-4 h-4" />
+              <Bell className={`w-4 h-4 ${darkMode ? 'text-[#38bdf8]' : ''}`} />
               <span className="hidden sm:inline">Notificaciones</span>
               {sinLeer > 0 && <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse ml-0.5"></span>}
             </button>
@@ -304,7 +345,10 @@ function Navbar({
                 <div className={`flex items-center justify-between px-4 py-3 border-b ${separador}`}>
                   <span className="text-xs font-bold">Notificaciones {sinLeer > 0 && `(${sinLeer})`}</span>
                   {sinLeer > 0 && (
-                    <button onClick={marcarLeidas} className="flex items-center gap-1 text-[10px] text-sky-500 hover:underline outline-none font-medium">
+                    <button
+                      onClick={marcarLeidas}
+                      className="flex items-center gap-1 text-[10px] text-[#38bdf8] hover:underline outline-none font-medium"
+                    >
                       <Check className="w-3.5 h-3.5" /> Marcar leídas
                     </button>
                   )}
@@ -317,7 +361,9 @@ function Navbar({
                     <button key={n.id} onClick={() => leerNotif(n.id)} className={itemResultado}>
                       <span className={`w-2 h-2 rounded-full shrink-0 ${n.leida ? 'bg-transparent' : 'bg-emerald-400'}`}></span>
                       <span className="flex-1 min-w-0 text-left">
-                        <span className={`block truncate ${n.leida ? 'text-slate-400' : 'font-semibold text-current'}`}>{n.titulo}</span>
+                        <span className={`block truncate ${n.leida ? 'text-slate-400' : 'font-semibold text-current'}`}>
+                          {n.titulo}
+                        </span>
                         <span className="block text-[10px] text-slate-400">{n.detalle}</span>
                       </span>
                     </button>
@@ -336,9 +382,7 @@ function Navbar({
                 document.exitFullscreen();
               }
             }}
-            className={`p-2.5 rounded-xl border outline-none transition-all ${
-              darkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-500'
-            }`}
+            className={botonIcono}
             title="Pantalla completa"
           >
             <Maximize className="w-4 h-4" />
@@ -348,9 +392,7 @@ function Navbar({
           <div className="relative" data-menu>
             <button
               onClick={() => alternar('ajustes')}
-              className={`p-2.5 rounded-xl border relative outline-none transition-all ${
-                darkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-500'
-              }`}
+              className={`${botonIcono} relative`}
               title="Ajustes"
             >
               <Settings className="w-4 h-4" />
@@ -359,31 +401,41 @@ function Navbar({
 
             {abierto === 'ajustes' && (
               <div className={`${panel} right-0 w-52 shadow-2xl`}>
-                <button onClick={irAjustes} className={itemResultado}><Settings className="w-4 h-4 text-slate-400" /> Configuración</button>
+                <button onClick={irAjustes} className={itemResultado}>
+                  <Settings className="w-4 h-4 text-slate-400" /> Configuración
+                </button>
                 <button onClick={() => { setDarkMode(!darkMode); setAbierto(null); }} className={itemResultado}>
-                  {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-500" />}
+                  {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-400" />}
                   {darkMode ? 'Cambiar a modo luz' : 'Cambiar a modo oscuro'}
                 </button>
               </div>
             )}
           </div>
 
-          {/* Menú de Usuario / Perfil (Sin sombreado interno, imagen original restaurada) */}
+          {/* Menú de Usuario / Perfil */}
           <div className="relative" data-menu>
             <div
               onClick={() => alternar('perfil')}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && alternar('perfil')}
-              className={`flex items-center gap-2.5 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-900'} text-white pl-1.5 py-1 pr-3.5 rounded-full shadow-sm ml-1 cursor-pointer opacity-95 hover:opacity-100 transition-opacity`}
+              className={`flex items-center gap-2.5 ${
+                darkMode
+                  ? 'bg-[#0f172a] border border-[#1e335c] hover:bg-[#13264c]'
+                  : 'bg-slate-900'
+              } text-white pl-1.5 py-1 pr-3.5 rounded-full shadow-sm ml-1 cursor-pointer opacity-95 hover:opacity-100 transition-all`}
             >
-              <img 
-                src={avatarUrl} 
-                alt={nombreUsuario} 
-                className="w-7 h-7 rounded-full object-cover border border-slate-700" 
+              <img
+                src={avatarUrl}
+                alt={nombreUsuario}
+                className="w-7 h-7 rounded-full object-cover border border-[#1e335c]"
               />
               <span className="text-xs font-semibold max-w-[110px] truncate">{nombreUsuario}</span>
-              <ChevronRight className={`w-3.5 h-3.5 text-slate-400 ml-0.5 transition-transform duration-200 ${abierto === 'perfil' ? 'rotate-90' : ''}`} />
+              <ChevronRight
+                className={`w-3.5 h-3.5 text-slate-400 ml-0.5 transition-transform duration-200 ${
+                  abierto === 'perfil' ? 'rotate-90' : ''
+                }`}
+              />
             </div>
 
             {abierto === 'perfil' && (
@@ -392,10 +444,16 @@ function Navbar({
                   <p className="text-[10px] text-slate-400 font-medium">Sesión activa</p>
                   <p className="text-xs font-bold truncate">{nombreUsuario}</p>
                 </div>
-                <button onClick={irPerfil} className={itemResultado}><User className="w-4 h-4 text-slate-400" /> Mi perfil</button>
-                <button onClick={irAjustes} className={itemResultado}><Settings className="w-4 h-4 text-slate-400" /> Configuración</button>
+                <button onClick={irPerfil} className={itemResultado}>
+                  <User className="w-4 h-4 text-slate-400" /> Mi perfil
+                </button>
+                <button onClick={irAjustes} className={itemResultado}>
+                  <Settings className="w-4 h-4 text-slate-400" /> Configuración
+                </button>
                 <div className={`border-t ${separador}`}></div>
-                <button onClick={cerrarSesion} className={`${itemResultado} text-red-500 hover:bg-red-500/10`}><LogOut className="w-4 h-4" /> Cerrar sesión</button>
+                <button onClick={cerrarSesion} className={`${itemResultado} text-rose-400 hover:bg-rose-500/10`}>
+                  <LogOut className="w-4 h-4" /> Cerrar sesión
+                </button>
               </div>
             )}
           </div>
@@ -406,52 +464,64 @@ function Navbar({
       {/* Modal de Información Detallada */}
       {personaSeleccionada && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-100 text-slate-800'}`}>
+          <div
+            className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border ${
+              darkMode
+                ? 'bg-[#0b1b3a] border-[#1e335c] text-white'
+                : 'bg-white border-slate-100 text-slate-800'
+            }`}
+          >
             <div className="flex items-center justify-between pb-4 border-b border-slate-200/20">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-500 flex items-center justify-center font-bold text-lg">
+                <div className="w-10 h-10 rounded-xl bg-[#0284c7]/15 text-[#38bdf8] flex items-center justify-center font-bold text-lg">
                   {(personaSeleccionada.nombres || personaSeleccionada.nombre || 'U').charAt(0)}
                 </div>
                 <div>
                   <h3 className="text-base font-bold">
                     {personaSeleccionada.nombres || personaSeleccionada.nombre} {personaSeleccionada.apellidos}
                   </h3>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-500">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#0284c7]/15 text-[#38bdf8]">
                     {personaSeleccionada.tipo || 'Miembro institucional'}
                   </span>
                 </div>
               </div>
               <button
                 onClick={() => setPersonaSeleccionada(null)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 transition-colors"
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  darkMode
+                    ? 'bg-[#0f172a] text-slate-300 hover:bg-[#13264c]'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="mt-5 space-y-3 text-xs">
-              <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
+              <div className={`flex justify-between py-1.5 border-b ${separador}`}>
                 <span className="text-slate-400 font-medium">Correo electrónico:</span>
                 <span className="font-semibold">{personaSeleccionada.correo || personaSeleccionada.email || 'No registrado'}</span>
               </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
+              <div className={`flex justify-between py-1.5 border-b ${separador}`}>
                 <span className="text-slate-400 font-medium">Documento / DNI:</span>
                 <span className="font-semibold font-mono">{personaSeleccionada.dni || personaSeleccionada.numero_documento || 'No especificado'}</span>
               </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
+              <div className={`flex justify-between py-1.5 border-b ${separador}`}>
                 <span className="text-slate-400 font-medium">Teléfono / Celular:</span>
                 <span className="font-semibold">{personaSeleccionada.telefono || 'Sin contacto'}</span>
               </div>
               <div className="flex justify-between py-1.5">
                 <span className="text-slate-400 font-medium">Especialidad / Programa:</span>
-                <span className="font-semibold">{personaSeleccionada.especialidad || personaSeleccionada.programa || 'Diseño y Programación Web'}</span>
+                <span className="font-semibold">
+                  {personaSeleccionada.especialidad || personaSeleccionada.programa || 'Diseño y Programación Web'}
+                </span>
               </div>
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-200/20 flex justify-end">
               <button
                 onClick={() => setPersonaSeleccionada(null)}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all shadow-sm"
+                className="px-5 py-2.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-semibold rounded-xl transition-all shadow-sm"
               >
                 Cerrar ventana
               </button>
