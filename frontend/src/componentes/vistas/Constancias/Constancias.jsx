@@ -2,8 +2,10 @@ import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   FiSearch, FiChevronDown, FiGrid, FiList, FiRefreshCw, FiFolder, FiFileText,
   FiCheckCircle, FiChevronLeft, FiChevronRight, FiAward, FiLoader, FiPrinter,
-  FiClock, FiBriefcase, FiUser, FiX, FiAlertCircle, FiArrowUp, FiShield, FiCalendar,
+  FiClock, FiX, FiAlertCircle, FiArrowUp, FiShield, FiCalendar, FiFilter, FiLayers,
 } from 'react-icons/fi';
+import api, { getCachedData, clearApiCache } from '../../../api/axios';
+import VistaConstanciaPDF from './VistaConstanciaPDF';
 
 /* ═════════════ Sistema de animación ═════════════ */
 const ESTILOS = `
@@ -12,45 +14,56 @@ const ESTILOS = `
 @keyframes cs-modal { 0% { opacity:0; transform:translateY(18px) scale(.96);} 100% { opacity:1; transform:translateY(0) scale(1);} }
 @keyframes cs-fade { from { opacity:0;} to { opacity:1;} }
 @keyframes cs-toast { from { opacity:0; transform:translateY(16px) scale(.97);} to { opacity:1; transform:translateY(0) scale(1);} }
-@keyframes cs-shine { 0% { transform:translateX(-120%);} 100% { transform:translateX(280%);} }
 @keyframes cs-skel { 0%,100% { opacity:.5;} 50% { opacity:1;} }
 @keyframes cs-ring { 0% { box-shadow:0 0 0 0 rgba(37,99,235,.40);} 100% { box-shadow:0 0 0 9px rgba(37,99,235,0);} }
 @keyframes cs-draw { from { stroke-dashoffset: var(--cs-len);} to { stroke-dashoffset: var(--cs-off);} }
 @keyframes cs-spin { to { transform: rotate(360deg);} }
-.cs-up { animation: cs-up .5s cubic-bezier(.22,1,.36,1) both; }
-.cs-pop { animation: cs-pop .35s cubic-bezier(.22,1,.36,1) both; }
-.cs-modal { animation: cs-modal .35s cubic-bezier(.22,1,.36,1) both; }
-.cs-fade { animation: cs-fade .25s ease-out both; }
-.cs-toast { animation: cs-toast .35s ease-out both; }
+@keyframes cs-grow { from { width:0;} }
+.cs-up { animation: cs-up .45s cubic-bezier(.22,1,.36,1) both; }
+.cs-pop { animation: cs-pop .3s cubic-bezier(.22,1,.36,1) both; }
+.cs-modal { animation: cs-modal .3s cubic-bezier(.22,1,.36,1) both; }
+.cs-fade { animation: cs-fade .2s ease-out both; }
+.cs-toast { animation: cs-toast .3s ease-out both; }
 .cs-skel { animation: cs-skel 1.4s ease-in-out infinite; }
 .cs-pulse { animation: cs-ring 1.9s ease-out infinite; }
-.cs-draw { animation: cs-draw 1s cubic-bezier(.22,1,.36,1) both; }
+.cs-draw { animation: cs-draw .9s cubic-bezier(.22,1,.36,1) both; }
 .cs-spin { animation: cs-spin .9s linear infinite; }
-.cs-shine { position:relative; overflow:hidden; }
-.cs-shine::after { content:""; position:absolute; inset:0; width:35%; background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent); animation: cs-shine 2.6s ease-in-out infinite; }
+.cs-grow { animation: cs-grow .8s cubic-bezier(.22,1,.36,1) both; }
 .cs-lift { transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s ease, border-color .25s ease; }
-.cs-lift:hover { transform: translateY(-3px); box-shadow: 0 16px 32px -16px rgba(15,23,42,.22); border-color:#cbd5e1; }
+.cs-lift:hover { transform: translateY(-2px); box-shadow: 0 14px 30px -18px rgba(15,23,42,.28); border-color:#cbd5e1; }
 .cs-press { transition: transform .15s ease, filter .2s ease, background-color .2s ease, border-color .2s ease, color .2s ease; }
 .cs-press:active:not(:disabled) { transform: scale(.97); }
-@media (prefers-reduced-motion: reduce) { .cs-up,.cs-pop,.cs-modal,.cs-fade,.cs-toast,.cs-skel,.cs-pulse,.cs-draw,.cs-spin,.cs-shine::after { animation:none !important; } .cs-lift:hover { transform:none; } }
+@media (prefers-reduced-motion: reduce) { .cs-up,.cs-pop,.cs-modal,.cs-fade,.cs-toast,.cs-skel,.cs-pulse,.cs-draw,.cs-spin,.cs-grow { animation:none !important; } .cs-lift:hover { transform:none; } }
 `;
 
-/* ═════════════ Constantes ═════════════ */
-const moduloStyle = {
-  desarrollo: 'bg-blue-50 text-blue-700 border-blue-200',
-  redes: 'bg-violet-50 text-violet-700 border-violet-200',
-  soporte: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+/* ═════════════ Catálogo de los 3 Módulos Formativos ═════════════ */
+const MODULOS_INFO = {
+  modulo1: {
+    id: 1,
+    corto: 'Módulo I',
+    nombre: 'Módulo I – Gestión de Soporte Técnico, Seguridad y Tecnologías de la Información',
+    punto: 'bg-cyan-500',
+  },
+  modulo2: {
+    id: 2,
+    corto: 'Módulo II',
+    nombre: 'Módulo II – Desarrollo de Software y Gestión de Base de Datos',
+    punto: 'bg-blue-600',
+  },
+  modulo3: {
+    id: 3,
+    corto: 'Módulo III',
+    nombre: 'Módulo III – Gestión de Aplicaciones para Internet y Producción Multimedia',
+    punto: 'bg-violet-500',
+  },
 };
-const moduloAcento = {
-  desarrollo: 'from-blue-600 to-blue-400',
-  redes: 'from-violet-600 to-violet-400',
-  soporte: 'from-cyan-600 to-cyan-400',
+
+const moduloPunto = {
+  modulo1: MODULOS_INFO.modulo1.punto,
+  modulo2: MODULOS_INFO.modulo2.punto,
+  modulo3: MODULOS_INFO.modulo3.punto,
 };
-const estadoBadge = {
-  'Constancia Emitida': 'bg-blue-50 text-blue-700 border-blue-200',
-  'Apto para Constancia': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  'Horas Incompletas': 'bg-amber-50 text-amber-700 border-amber-200',
-};
+
 const estadoPunto = {
   'Constancia Emitida': 'bg-blue-600',
   'Apto para Constancia': 'bg-emerald-500',
@@ -59,15 +72,24 @@ const estadoPunto = {
 
 const OPC_MODULO = [
   ['todos', 'Todos los Módulos'],
-  ['soporte', 'Módulo I – Soporte'],
-  ['desarrollo', 'Módulo II – Desarrollo'],
-  ['redes', 'Módulo III – Redes'],
+  ['modulo1', 'Módulo I – Soporte y TI'],
+  ['modulo2', 'Módulo II – Desarrollo de Software'],
+  ['modulo3', 'Módulo III – Aplicaciones y Multimedia'],
 ];
+
+const CHIPS_MODULO = [
+  ['todos', 'Todos', null],
+  ['modulo1', 'Módulo I', MODULOS_INFO.modulo1.punto],
+  ['modulo2', 'Módulo II', MODULOS_INFO.modulo2.punto],
+  ['modulo3', 'Módulo III', MODULOS_INFO.modulo3.punto],
+];
+
 const OPC_ORDEN = [
   ['nombre', 'Nombre (A-Z)'],
   ['horas_desc', 'Más horas primero'],
   ['horas_asc', 'Menos horas primero'],
 ];
+
 const TABS = [
   ['todos', 'Todos'],
   ['Apto para Constancia', 'Aptos'],
@@ -75,24 +97,364 @@ const TABS = [
   ['Horas Incompletas', 'En proceso'],
 ];
 
-const HORAS_META = 480;
+const HORAS_META = 160;
 const POR_PAGINA = 6;
 
 const card = 'bg-white rounded-2xl border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.04)]';
+const fv = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
 
-/* ═════════════ Lógica auxiliar (reglas sin cambios) ═════════════ */
+/* ═════════════ Lectura segura de almacenamiento local ═════════════ */
+const leerStorageSeguro = (clave) => {
+  try {
+    const raw = sessionStorage.getItem(clave) ?? localStorage.getItem(clave);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const buscarDatosGuardadosModulo = (idEstudiante, idModulo) => {
+  if (!idEstudiante) return null;
+  const claves = [
+    `expediente_calificacion_${idEstudiante}_m${idModulo}`,
+    `expediente_calificacion_${idEstudiante}_${idModulo}`,
+    `expediente_efsrt_${idEstudiante}_${idModulo}`,
+    `expediente_efsrt_${idEstudiante}_m${idModulo}`,
+  ];
+  for (const k of claves) {
+    const val = leerStorageSeguro(k);
+    if (val && typeof val === 'object') return val;
+  }
+  return null;
+};
+
+/* ═════════════ Resolución de Módulos (I, II, III) ═════════════ */
+const resolverModulo = (raw = {}) => {
+  const idNum = Number(
+    raw.id_modulo ??
+      raw.modulo_id ??
+      raw.numero_modulo ??
+      raw.modulo?.id_modulo ??
+      raw.modulo?.id ??
+      NaN
+  );
+
+  if (idNum === 1) return { key: 'modulo1', id: 1, etiqueta: raw.nombre_modulo || MODULOS_INFO.modulo1.nombre };
+  if (idNum === 2) return { key: 'modulo2', id: 2, etiqueta: raw.nombre_modulo || MODULOS_INFO.modulo2.nombre };
+  if (idNum === 3) return { key: 'modulo3', id: 3, etiqueta: raw.nombre_modulo || MODULOS_INFO.modulo3.nombre };
+
+  const textoOriginal =
+    (typeof raw.modulo === 'string' ? raw.modulo : raw.modulo?.nombre) ||
+    raw.nombre_modulo ||
+    raw.titulo_modulo ||
+    '';
+  const t = String(textoOriginal).toLowerCase().trim();
+
+  if (
+    t.includes('módulo iii') ||
+    t.includes('modulo iii') ||
+    t.includes('modulo 3') ||
+    t.includes('módulo 3') ||
+    t.includes('tercer') ||
+    t.includes('internet') ||
+    t.includes('multimedia') ||
+    t.includes('red')
+  ) {
+    return { key: 'modulo3', id: 3, etiqueta: textoOriginal || MODULOS_INFO.modulo3.nombre };
+  }
+
+  if (
+    t.includes('módulo ii') ||
+    t.includes('modulo ii') ||
+    t.includes('modulo 2') ||
+    t.includes('módulo 2') ||
+    t.includes('segund') ||
+    t.includes('desarrollo') ||
+    t.includes('software') ||
+    t.includes('base de datos')
+  ) {
+    return { key: 'modulo2', id: 2, etiqueta: textoOriginal || MODULOS_INFO.modulo2.nombre };
+  }
+
+  if (
+    t.includes('módulo i') ||
+    t.includes('modulo i') ||
+    t.includes('modulo 1') ||
+    t.includes('módulo 1') ||
+    t.includes('primer') ||
+    t.includes('soporte') ||
+    t.includes('seguridad')
+  ) {
+    return { key: 'modulo1', id: 1, etiqueta: textoOriginal || MODULOS_INFO.modulo1.nombre };
+  }
+
+  const sem = String(raw.semestre || '').toUpperCase();
+  if (sem.includes('V') || sem.includes('VI') || sem.includes('5') || sem.includes('6')) {
+    return { key: 'modulo3', id: 3, etiqueta: MODULOS_INFO.modulo3.nombre };
+  }
+  if (sem.includes('III') || sem.includes('IV') || sem.includes('3') || sem.includes('4')) {
+    return { key: 'modulo2', id: 2, etiqueta: MODULOS_INFO.modulo2.nombre };
+  }
+  return { key: 'modulo1', id: 1, etiqueta: MODULOS_INFO.modulo1.nombre };
+};
+
+/* ═════════════ Validación de constancia emitida / ID / impresión previa ═════════════ */
+const tieneConstanciaYaEmitida = (item) => {
+  if (!item || typeof item !== 'object') return false;
+  const estadoRaw = String(item.estado || item.estado_constancia || '').toLowerCase();
+  return Boolean(
+    item.emitida ||
+      item.impreso ||
+      item.id_constancia ||
+      item.codigo_documento ||
+      item.codigo_constancia ||
+      estadoRaw.includes('emitid')
+  );
+};
+
+/* ═════════════ Normalización, cumplimiento de práctica y vínculo con expediente ═════════════ */
+const extraerArreglo = (payload) => {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.expedientes)) return payload.expedientes;
+  if (Array.isArray(payload.constancias)) return payload.constancias;
+  if (Array.isArray(payload.estudiantes)) return payload.estudiantes;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (payload.data && Array.isArray(payload.data.data)) return payload.data.data;
+  if (payload.data && Array.isArray(payload.data.expedientes)) return payload.data.expedientes;
+  return [];
+};
+
+const estaCumplidoYListoParaConstancia = (item) => {
+  if (!item || typeof item !== 'object') return false;
+
+  const estadoRaw = String(item.estado || item.estado_constancia || item.estado_efsrt || '').toLowerCase();
+  const constanciaEmitida =
+    tieneConstanciaYaEmitida(item) ||
+    estadoRaw.includes('culminad');
+
+  const marcadoListo = Boolean(
+    item.listo_para_constancia ||
+      item.apto_constancia ||
+      estadoRaw.includes('listo') ||
+      estadoRaw.includes('apto') ||
+      estadoRaw.includes('verificad') ||
+      estadoRaw.includes('validad') ||
+      estadoRaw.includes('aprob') ||
+      estadoRaw.includes('complet') ||
+      estadoRaw.includes('egresad')
+  );
+
+  const notaNumerica = Number(
+    item.nota ??
+      item.nota_final ??
+      item.promedio ??
+      item.promedio_final ??
+      item.calificacion ??
+      NaN
+  );
+  const tieneNotaAprobatoria = !Number.isNaN(notaNumerica) && notaNumerica >= 13;
+
+  const evidenciasArr = Array.isArray(item.evidencias)
+    ? item.evidencias
+    : Array.isArray(item.documentos)
+    ? item.documentos
+    : Array.isArray(item.entregables)
+    ? item.entregables
+    : [];
+  const cantidadEvidencias = Number(
+    item.total_evidencias ?? item.evidencias_count ?? item.nro_evidencias ?? evidenciasArr.length ?? 0
+  );
+
+  const horasNum = Number(
+    item.hrs ?? item.horas_acumuladas ?? item.horas_completadas ?? item.horas_efsrt ?? item.horas ?? 0
+  );
+  const metaHoras = Number(item.horas_requeridas ?? HORAS_META) || HORAS_META;
+  const horasCumplidas = horasNum >= metaHoras;
+
+  return (
+    constanciaEmitida ||
+    marcadoListo ||
+    horasCumplidas ||
+    (Boolean(item.verificado_docente) && (tieneNotaAprobatoria || cantidadEvidencias > 0))
+  );
+};
+
+const normalizarRegistro = (raw, idx = 0, expedientesMap = new Map(), estudiantesMap = new Map()) => {
+  const estObj = raw.estudiante && typeof raw.estudiante === 'object' ? raw.estudiante : {};
+  const expObj = raw.expediente && typeof raw.expediente === 'object' ? raw.expediente : {};
+
+  const idEstudiante =
+    raw.id_estudiante ??
+    estObj.id_estudiante ??
+    expObj.id_estudiante ??
+    raw.id ??
+    idx + 1;
+
+  const dni = String(raw.dni ?? estObj.dni ?? expObj.dni ?? '').trim();
+  const estMatch = estudiantesMap.get(String(idEstudiante)) || (dni ? estudiantesMap.get(dni) : null) || {};
+  const expMatch = expedientesMap.get(String(idEstudiante)) || (dni ? expedientesMap.get(dni) : null) || {};
+
+  const modResuelto = resolverModulo({
+    ...estMatch,
+    ...expMatch,
+    ...raw,
+    id_modulo: raw.id_modulo ?? expObj.id_modulo ?? expMatch.id_modulo ?? raw.modulo_id,
+    modulo: raw.modulo ?? expObj.modulo ?? expMatch.modulo,
+  });
+
+  const localGuardado = buscarDatosGuardadosModulo(idEstudiante, modResuelto.id) || {};
+
+  const combinado = {
+    ...estMatch,
+    ...expMatch,
+    ...raw,
+    ...localGuardado,
+  };
+
+  const nombres = combinado.nombres ?? estObj.nombres ?? estMatch.nombres ?? '';
+  const apellidos = combinado.apellidos ?? estObj.apellidos ?? estMatch.apellidos ?? '';
+  const nombre =
+    combinado.nombre ||
+    estObj.nombre ||
+    `${nombres} ${apellidos}`.trim() ||
+    `${estMatch.nombres || ''} ${estMatch.apellidos || ''}`.trim() ||
+    'Estudiante sin nombre';
+
+  const idExpediente =
+    combinado.id_expediente ??
+    expObj.id_expediente ??
+    expMatch.id_expediente ??
+    raw.expediente_id ??
+    null;
+
+  const expCodigo =
+    combinado.codigo_documento ||
+    combinado.exp ||
+    combinado.codigo_expediente ||
+    combinado.numero_expediente ||
+    expObj.codigo_expediente ||
+    expObj.codigo ||
+    expMatch.codigo_expediente ||
+    expMatch.codigo ||
+    (idExpediente
+      ? `#EXP-${idExpediente}`
+      : `#EXP-M${modResuelto.id}-${String(idEstudiante).padStart(4, '0')}`);
+
+  const horasRequeridas = Number(
+    combinado.horas_requeridas ?? expObj.horas_requeridas ?? expMatch.horas_requeridas ?? HORAS_META
+  ) || HORAS_META;
+
+  const horasRaw = Number(
+    combinado.hrs ??
+      combinado.horas_acumuladas ??
+      combinado.horas_completadas ??
+      combinado.horas_efsrt ??
+      combinado.horas ??
+      expObj.horas_acumuladas ??
+      expMatch.horas_acumuladas ??
+      0
+  );
+
+  const estadoOriginal =
+    combinado.estado ||
+    combinado.estado_constancia ||
+    expObj.estado ||
+    expMatch.estado ||
+    '';
+
+  const emitidaFlag =
+    tieneConstanciaYaEmitida(combinado) ||
+    estadoOriginal === 'Constancia Emitida' ||
+    estadoOriginal === 'Emitida' ||
+    estadoOriginal === 'Culminado' ||
+    estadoOriginal === 'Culminada';
+
+  const notaNum = Number(
+    combinado.nota ??
+      combinado.nota_final ??
+      combinado.promedio ??
+      combinado.calificacion ??
+      NaN
+  );
+
+  const aptoFlag =
+    !emitidaFlag &&
+    (Boolean(combinado.listo_para_constancia) ||
+      horasRaw >= horasRequeridas ||
+      estMatch.estado === 'Egresado' ||
+      (Boolean(combinado.verificado_docente) && !Number.isNaN(notaNum) && notaNum >= 13));
+
+  const estadoNormalizado = emitidaFlag
+    ? 'Constancia Emitida'
+    : aptoFlag
+    ? 'Apto para Constancia'
+    : 'Horas Incompletas';
+
+  return {
+    ...combinado,
+    id_estudiante: idEstudiante,
+    id_expediente: idExpediente,
+    id_modulo: modResuelto.id,
+    id_constancia: combinado.id_constancia ?? null,
+    moduloKey: modResuelto.key,
+    modulo: modResuelto.etiqueta,
+    dni,
+    nombres: nombres || estMatch.nombres || '',
+    apellidos: apellidos || estMatch.apellidos || '',
+    nombre,
+    exp: expCodigo,
+    codigo_expediente: expCodigo,
+    codigo_documento: combinado.codigo_documento || combinado.codigo_constancia || '',
+    emitida: emitidaFlag,
+    empresa:
+      combinado.empresa ||
+      combinado.empresa_nombre ||
+      combinado.empresa_institucion ||
+      combinado.razon_social ||
+      expObj.empresa ||
+      expMatch.empresa ||
+      'Empresa formadora asignada',
+    asesor:
+      combinado.asesor ||
+      combinado.docente_asesor ||
+      combinado.docente_asignado ||
+      combinado.docente_responsable ||
+      expObj.asesor ||
+      expMatch.asesor ||
+      'Docente asesor EFSRT',
+    nota: !Number.isNaN(notaNum) ? notaNum : null,
+    estado_portafolio:
+      combinado.estado_portafolio ||
+      expObj.estado_portafolio ||
+      expMatch.estado_portafolio ||
+      'Conforme',
+    horas_requeridas: horasRequeridas,
+    hrs: horasRaw > 0 ? horasRaw : emitidaFlag || aptoFlag ? horasRequeridas : 0,
+    estado: estadoNormalizado,
+    fecha_emision:
+      combinado.fecha_emision ||
+      combinado.fecha_constancia ||
+      combinado.fecha ||
+      expObj.fecha_emision ||
+      expMatch.fecha_emision ||
+      combinado.created_at ||
+      '',
+  };
+};
+
 const calcular = (e) => {
-  const horas = e.hrs || HORAS_META;
-  const completas = horas >= HORAS_META;
-  const emitida = e.estado === 'Constancia Emitida';
+  const meta = Number(e.horas_requeridas) || HORAS_META;
+  const horas = Number(e.hrs) || 0;
+  const emitida = tieneConstanciaYaEmitida(e) || e.estado === 'Constancia Emitida';
+  const completas = horas >= meta || emitida || Boolean(e.listo_para_constancia);
   const apto = completas && !emitida;
-  const estadoVisual = emitida ? 'Constancia Emitida' : completas ? 'Apto para Constancia' : 'Horas Incompletas';
-  const pct = Math.min(100, Math.round((horas / HORAS_META) * 100));
-  return { horas, completas, emitida, apto, estadoVisual, pct };
+  const estadoVisual = emitida ? 'Constancia Emitida' : apto ? 'Apto para Constancia' : 'Horas Incompletas';
+  const pct = Math.min(100, Math.round((horas / meta) * 100));
+  return { horas, meta, completas, emitida, apto, estadoVisual, pct };
 };
 
 /* ───── Fechas ───── */
-// Toma la primera fecha disponible del registro (formato ISO AAAA-MM-DD)
 const fechaDe = (e) => {
   const bruta = e.fecha_emision || e.fecha_constancia || e.fecha || e.created_at || e.fecha_fin || '';
   const m = String(bruta).match(/^\d{4}-\d{2}-\d{2}/);
@@ -128,7 +490,6 @@ const rangoPreset = (k) => {
   return [aISO(new Date(hoy.getFullYear(), 0, 1)), aISO(hoy)];
 };
 
-// Sin filtro activo todo pasa; con filtro, los registros sin fecha quedan fuera
 const dentroDeRango = (e, desde, hasta) => {
   if (!desde && !hasta) return true;
   const f = fechaDe(e);
@@ -144,9 +505,7 @@ const iniciales = (e) =>
   (e.nombre || 'EF').split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
 
 /* ───── Impresión masiva ───── */
-// Cambia este nombre por el de tu institución: aparece en el encabezado de cada constancia
-const NOMBRE_INSTITUCION = 'Instituto de Educación Superior Tecnológico';
-
+const NOMBRE_INSTITUCION = 'IESTP "Andrés Avelino Cáceres Dorregaray"';
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 const fechaLarga = (iso) => {
@@ -158,7 +517,6 @@ const fechaLarga = (iso) => {
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// Una constancia por hoja A4, lista para imprimir o guardar como PDF
 const generarHtmlConstancias = (lista) => {
   const hoy = aISO(new Date());
   const hojas = lista
@@ -175,11 +533,11 @@ const generarHtmlConstancias = (lista) => {
           <p class="nombre">${esc(e.nombre)}</p>
           <p class="dni">identificado(a) con DNI N.º ${esc(e.dni)}</p>
           <p class="cuerpo">
-            ha culminado y aprobado satisfactoriamente el módulo de
-            <b>${esc(e.modulo || 'Experiencias Formativas')}</b>, acumulando
+            ha culminado y aprobado satisfactoriamente el
+            <b>${esc(e.modulo)}</b>, acumulando
             <b>${info.horas} horas</b> de experiencia formativa en
             <b>${esc(e.empresa || 'la empresa formadora')}</b>, bajo la asesoría del docente
-            <b>${esc(e.asesor || 'asignado')}</b>.
+            <b>${esc(e.asesor || 'asignado')}</b>${e.nota != null ? ` con calificación final de <b>${Number(e.nota).toFixed(2)} / 20</b>` : ''}.
           </p>
           <p class="fecha">Se expide la presente a solicitud del interesado, el ${esc(fechaLarga(fechaDe(e) || hoy))}.</p>
           <div class="firmas">
@@ -217,9 +575,9 @@ const generarHtmlConstancias = (lista) => {
 };
 
 /* ═════════════ Componentes base ═════════════ */
-function useContador(objetivo, duracion = 900) {
-  const [v, setV] = useState(0);
-  const ref = useRef(0);
+function useContador(objetivo, duracion = 500) {
+  const [v, setV] = useState(objetivo);
+  const ref = useRef(objetivo);
   useEffect(() => {
     const inicio = ref.current;
     const t0 = performance.now();
@@ -256,13 +614,14 @@ const Anillo = ({ pct, size = 52, grosor = 5, color = 'text-blue-600', children 
   );
 };
 
-const Select = ({ value, onChange, opciones, w, icon: Icon }) => (
+const Select = ({ value, onChange, opciones, w, icon: Icon, etiqueta }) => (
   <div className={`relative ${w}`}>
     {Icon && <Icon className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />}
     <select
       value={value}
+      aria-label={etiqueta}
       onChange={(e) => onChange(e.target.value)}
-      className={`h-10 w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white pr-9 text-[12px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 ${Icon ? 'pl-9' : 'pl-3.5'}`}
+      className={`h-10 w-full cursor-pointer appearance-none rounded-lg border border-slate-200 bg-white pr-9 text-[12px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 ${Icon ? 'pl-9' : 'pl-3.5'}`}
     >
       {opciones.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
     </select>
@@ -271,39 +630,47 @@ const Select = ({ value, onChange, opciones, w, icon: Icon }) => (
 );
 
 const Badge = ({ estado }) => (
-  <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold ${estadoBadge[estado] || estadoBadge['Horas Incompletas']}`}>
+  <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
     <i className={`h-1.5 w-1.5 rounded-full ${estadoPunto[estado] || estadoPunto['Horas Incompletas']} ${estado === 'Apto para Constancia' ? 'animate-pulse' : ''}`} />
     {estado}
+  </span>
+);
+
+const ModuloChip = ({ e }) => (
+  <span className="inline-flex max-w-full items-center gap-1.5 text-[12px] font-semibold text-slate-800" title={e.modulo}>
+    <i className={`h-2 w-2 shrink-0 rounded-full ${moduloPunto[e.moduloKey] || moduloPunto.modulo1}`} />
+    <span className="truncate">{e.modulo}</span>
   </span>
 );
 
 const BarraHoras = ({ pct, completas }) => (
   <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
     <div
-      className={`cs-shine h-full rounded-full bg-gradient-to-r ${completas ? 'from-blue-600 to-blue-400' : 'from-amber-500 to-amber-300'}`}
-      style={{ width: `${pct}%`, transition: 'width .9s cubic-bezier(.22,1,.36,1)' }}
+      className={`cs-grow h-full rounded-full ${completas ? 'bg-blue-600' : 'bg-amber-500'}`}
+      style={{ width: `${pct}%`, transition: 'width .8s cubic-bezier(.22,1,.36,1)' }}
     />
   </div>
 );
 
 const Avatar = ({ e, size = 'h-11 w-11 text-[12px]' }) => (
-  <span className={`${size} grid shrink-0 place-items-center rounded-xl bg-gradient-to-br font-bold text-white shadow-sm ${moduloAcento[e.moduloKey] || moduloAcento.desarrollo}`}>
+  <span className={`${size} relative grid shrink-0 place-items-center rounded-full border border-slate-200 bg-white font-bold text-slate-700`}>
     {iniciales(e)}
+    <i className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${moduloPunto[e.moduloKey] || moduloPunto.modulo1}`} />
   </span>
 );
 
-const Kpi = ({ icon: Icon, valor, label, detalle, tono, delay, anillo }) => {
+const Kpi = ({ icon: Icon, valor, label, detalle, color, delay, anillo }) => {
   const n = useContador(valor);
   return (
-    <div style={{ animationDelay: `${delay}s` }} className={`${card} cs-up cs-lift flex items-center gap-4 p-4`}>
+    <div style={{ animationDelay: `${delay}s` }} className={`${card} cs-up cs-lift flex items-center gap-4 p-5`}>
       {anillo !== undefined ? (
-        <Anillo pct={anillo} size={56} color={tono.texto}>{anillo}%</Anillo>
+        <Anillo pct={anillo} size={52} color={color}>{anillo}%</Anillo>
       ) : (
-        <span className={`grid h-14 w-14 place-items-center rounded-2xl ${tono.fondo} ${tono.texto}`}><Icon className="h-6 w-6" /></span>
+        <span className={`grid h-[52px] w-[52px] shrink-0 place-items-center rounded-full border border-slate-200 bg-white ${color}`}><Icon className="h-5 w-5" /></span>
       )}
       <div className="min-w-0">
-        <div className="text-[26px] font-extrabold leading-none tracking-tight text-slate-900">{n}</div>
-        <div className="mt-1.5 text-[12px] font-semibold text-slate-700">{label}</div>
+        <div className="text-[12px] font-medium text-slate-500">{label}</div>
+        <div className="text-[28px] font-extrabold leading-tight tracking-tight tabular-nums text-slate-900">{n}</div>
         <div className="text-[11px] text-slate-400">{detalle}</div>
       </div>
     </div>
@@ -312,21 +679,25 @@ const Kpi = ({ icon: Icon, valor, label, detalle, tono, delay, anillo }) => {
 
 function BotonAccion({ e, info, procesandoId, onVerConstancia, onPedirEmision, compacto = false }) {
   const { emitida, apto } = info;
-  const cargandoEste = procesandoId === e.id_estudiante;
+  const cargandoEste = procesandoId === `${e.id_estudiante}-${e.id_modulo}`;
   const tam = compacto ? 'h-8 px-3 text-[11px]' : 'h-10 text-[12px]';
   return (
     <button
+      type="button"
       disabled={(!apto && !emitida) || cargandoEste}
       onClick={() => {
-        if (emitida) onVerConstancia && onVerConstancia(e);
-        else if (apto) onPedirEmision(e);
+        if (emitida) {
+          onVerConstancia && onVerConstancia(e);
+        } else if (apto) {
+          onPedirEmision(e);
+        }
       }}
-      className={`${tam} cs-press flex items-center justify-center gap-2 rounded-xl font-bold ${
+      className={`${tam} cs-press ${fv} flex items-center justify-center gap-2 rounded-lg font-bold ${
         emitida
-          ? 'cursor-pointer bg-slate-900 text-white shadow-md shadow-slate-900/15 hover:bg-slate-800'
+          ? 'cursor-pointer bg-slate-900 text-white hover:bg-slate-800'
           : apto
-          ? 'cs-pulse cursor-pointer bg-blue-600 text-white shadow-md shadow-blue-600/25 hover:bg-blue-700'
-          : 'cursor-not-allowed border border-slate-200 bg-slate-50 text-slate-400'
+          ? 'cs-pulse cursor-pointer bg-blue-600 text-white hover:bg-blue-700'
+          : 'cursor-not-allowed border border-slate-200 bg-white text-slate-400'
       }`}
     >
       {cargandoEste ? <FiLoader className="cs-spin h-3.5 w-3.5" />
@@ -337,62 +708,63 @@ function BotonAccion({ e, info, procesandoId, onVerConstancia, onPedirEmision, c
   );
 }
 
-function Tarjeta({ e, indice, onSeleccionarEstudiante, onVerConstancia, onPedirEmision, procesandoId }) {
+function Tarjeta({ e, indice, onVerExpediente, onVerConstancia, onPedirEmision, procesandoId }) {
   const info = calcular(e);
-  const abrir = () => onSeleccionarEstudiante && onSeleccionarEstudiante(e);
+  const abrir = () => onVerExpediente(e);
   return (
-    <article style={{ animationDelay: `${indice * 0.06}s` }} className={`${card} cs-up cs-lift group relative overflow-hidden`}>
-      <div className={`absolute inset-y-0 left-0 w-1 ${info.emitida ? 'bg-blue-600' : info.apto ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-      <div className="p-5 pl-6">
+    <article style={{ animationDelay: `${indice * 0.04}s` }} className={`${card} cs-up cs-lift group`}>
+      <div className="p-5">
         <div className="flex items-start justify-between gap-3">
-          <button type="button" onClick={abrir} className="flex min-w-0 cursor-pointer items-center gap-3.5 text-left">
+          <button type="button" onClick={abrir} className={`flex min-w-0 cursor-pointer items-center gap-3.5 rounded-lg text-left ${fv}`}>
             <Avatar e={e} size="h-12 w-12 text-[13px]" />
             <div className="min-w-0">
               <div className="truncate text-[14px] font-bold leading-tight text-slate-900 transition-colors group-hover:text-blue-600">{e.nombre}</div>
               <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
-                <span>DNI {e.dni}</span><span>•</span>
-                <span className="font-mono font-semibold text-slate-500">{e.exp || '#EXP-2026'}</span>
+                <span>DNI {e.dni || '—'}</span><span>•</span>
+                <span className="font-mono font-semibold text-slate-500">{e.exp}</span>
               </div>
             </div>
           </button>
           <Badge estado={info.estadoVisual} />
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <span className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold ${moduloStyle[e.moduloKey] || moduloStyle.desarrollo}`}>
-            {e.modulo || 'Diseño y Programación Web'}
-          </span>
-          <span className="text-[11px] text-slate-400">{e.nota || (info.completas ? 'Acreditación completada' : 'En proceso')}</span>
-        </div>
-
-        <div className="mt-4 grid grid-cols-[1fr_auto] items-center gap-4 rounded-xl bg-slate-50 p-3.5">
-          <div className="min-w-0 space-y-2.5 text-[12px]">
-            <div className="flex items-center gap-2 text-slate-500">
-              <FiBriefcase className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate font-semibold text-slate-800">{e.empresa || 'WORLDNIC Tech'}</span>
-            </div>
-            <div className="flex items-center gap-2 text-slate-500">
-              <FiUser className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate font-semibold text-slate-800">{e.asesor || 'Julio César Gutarra Ramos'}</span>
-            </div>
-            <div className="flex items-center gap-2 text-slate-500">
-              <FiCalendar className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate font-semibold text-slate-800">{formatearFecha(fechaDe(e))}</span>
-            </div>
-            <div>
-              <div className="mb-1.5 text-[11px] text-slate-400">
-                <b className={info.completas ? 'text-blue-600' : 'text-amber-600'}>{info.horas}</b> / {HORAS_META} horas EFSRT
-              </div>
-              <BarraHoras pct={info.pct} completas={info.completas} />
-            </div>
+        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3.5 border-t border-slate-100 pt-4">
+          <div className="min-w-0">
+            <dt className="mb-1 text-[11px] text-slate-400">Módulo formativo</dt>
+            <dd><ModuloChip e={e} /></dd>
           </div>
-          <Anillo pct={info.pct} size={58} color={info.completas ? 'text-blue-600' : 'text-amber-500'}>{info.pct}%</Anillo>
+          <div className="min-w-0">
+            <dt className="mb-1 text-[11px] text-slate-400">Empresa de práctica</dt>
+            <dd className="truncate text-[12px] font-semibold text-slate-800">{e.empresa}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="mb-1 text-[11px] text-slate-400">Asesor / Nota</dt>
+            <dd className="truncate text-[12px] font-semibold text-slate-800">
+              {e.asesor}
+              {e.nota != null ? ` · ${Number(e.nota).toFixed(2)}/20` : ''}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="mb-1 text-[11px] text-slate-400">Portafolio / Fecha</dt>
+            <dd className="truncate text-[12px] font-semibold text-slate-800">
+              {e.estado_portafolio} · {formatearFecha(fechaDe(e))}
+            </dd>
+          </div>
+        </dl>
+
+        <div className="mt-4">
+          <div className="mb-1.5 flex items-baseline justify-between text-[11px] text-slate-400">
+            <span><b className={info.completas ? 'text-blue-600' : 'text-amber-600'}>{info.horas}</b> / {info.meta} horas EFSRT</span>
+            <b className="text-slate-700">{info.pct}%</b>
+          </div>
+          <BarraHoras pct={info.pct} completas={info.completas} />
         </div>
 
-        <div className="mt-4 grid grid-cols-[1fr_1.35fr] gap-2.5">
+        <div className="mt-5 grid grid-cols-[1fr_1.35fr] gap-2.5">
           <button
+            type="button"
             onClick={abrir}
-            className="cs-press flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[12px] font-bold text-slate-700 hover:border-blue-500 hover:bg-blue-50/50 hover:text-blue-600"
+            className={`cs-press ${fv} flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-[12px] font-bold text-slate-700 hover:border-blue-500 hover:text-blue-600`}
           >
             <FiFolder className="h-3.5 w-3.5" /> Ver Expediente
           </button>
@@ -403,15 +775,15 @@ function Tarjeta({ e, indice, onSeleccionarEstudiante, onVerConstancia, onPedirE
   );
 }
 
-function TablaExpedientes({ lista, onSeleccionarEstudiante, onVerConstancia, onPedirEmision, procesandoId }) {
+function TablaExpedientes({ lista, onVerExpediente, onVerConstancia, onPedirEmision, procesandoId }) {
   return (
     <div className={`${card} cs-pop overflow-hidden`}>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/80">
-              {['Alumno', 'Expediente', 'Módulo', 'Empresa', 'Fecha', 'Avance', 'Estado', 'Acciones'].map((c) => (
-                <th key={c} className="px-4 py-3.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">{c}</th>
+            <tr className="border-b border-slate-200">
+              {['Alumno', 'Expediente', 'Módulo', 'Empresa / Asesor', 'Fecha', 'Avance', 'Estado', 'Acciones'].map((c) => (
+                <th key={c} className="px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500">{c}</th>
               ))}
             </tr>
           </thead>
@@ -420,28 +792,32 @@ function TablaExpedientes({ lista, onSeleccionarEstudiante, onVerConstancia, onP
               const info = calcular(e);
               return (
                 <tr
-                  key={e.exp || e.dni}
-                  style={{ animationDelay: `${i * 0.04}s` }}
-                  className="cs-up group border-b border-slate-100 text-[12px] transition-colors last:border-0 hover:bg-blue-50/40"
+                  key={`${e.id_estudiante}-${e.id_modulo}-${e.exp}-${i}`}
+                  style={{ animationDelay: `${i * 0.03}s` }}
+                  className="cs-up group border-b border-slate-100 text-[12px] transition-colors last:border-0 hover:bg-slate-50"
                 >
                   <td className="px-4 py-3">
-                    <button type="button" onClick={() => onSeleccionarEstudiante && onSeleccionarEstudiante(e)} className="flex cursor-pointer items-center gap-3 text-left">
+                    <button type="button" onClick={() => onVerExpediente(e)} className={`flex cursor-pointer items-center gap-3 rounded-lg text-left ${fv}`}>
                       <Avatar e={e} size="h-9 w-9 text-[11px]" />
                       <div>
                         <div className="text-[13px] font-bold text-slate-900 transition-colors group-hover:text-blue-600">{e.nombre}</div>
-                        <div className="text-[11px] text-slate-400">DNI {e.dni}</div>
+                        <div className="text-[11px] text-slate-400">
+                          DNI {e.dni || '—'}
+                          {e.nota != null ? ` · Nota ${Number(e.nota).toFixed(2)}` : ''}
+                        </div>
                       </div>
                     </button>
                   </td>
                   <td className="px-4 font-mono text-slate-500">{e.exp}</td>
-                  <td className="px-4">
-                    <span className={`whitespace-nowrap rounded-lg border px-2 py-0.5 text-[11px] font-semibold ${moduloStyle[e.moduloKey] || moduloStyle.desarrollo}`}>{e.modulo}</span>
+                  <td className="max-w-[230px] px-4"><ModuloChip e={e} /></td>
+                  <td className="px-4 text-slate-500">
+                    <div className="font-semibold text-slate-700">{e.empresa}</div>
+                    <div className="text-[11px] text-slate-400">{e.asesor}</div>
                   </td>
-                  <td className="px-4 text-slate-500">{e.empresa}</td>
                   <td className="whitespace-nowrap px-4 font-medium text-slate-600">{formatearFecha(fechaDe(e))}</td>
                   <td className="min-w-[150px] px-4">
                     <div className="mb-1 flex justify-between text-[11px]">
-                      <b className={info.completas ? 'text-blue-600' : 'text-amber-600'}>{info.horas} h</b>
+                      <b className={info.completas ? 'text-blue-600' : 'text-amber-600'}>{info.horas} / {info.meta} h</b>
                       <span className="text-slate-400">{info.pct}%</span>
                     </div>
                     <BarraHoras pct={info.pct} completas={info.completas} />
@@ -450,8 +826,9 @@ function TablaExpedientes({ lista, onSeleccionarEstudiante, onVerConstancia, onP
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => onSeleccionarEstudiante && onSeleccionarEstudiante(e)}
-                        className="cs-press inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-700 hover:border-blue-500 hover:text-blue-600"
+                        type="button"
+                        onClick={() => onVerExpediente(e)}
+                        className={`cs-press ${fv} inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-700 hover:border-blue-500 hover:text-blue-600`}
                       >
                         <FiFolder className="h-3 w-3" /> Expediente
                       </button>
@@ -471,18 +848,42 @@ function TablaExpedientes({ lista, onSeleccionarEstudiante, onVerConstancia, onP
 }
 
 const Esqueleto = () => (
-  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
     {[0, 1, 2, 3].map((i) => (
-      <div key={i} style={{ animationDelay: `${i * 0.12}s` }} className={`${card} cs-skel space-y-4 p-5`}>
+      <div key={i} style={{ animationDelay: `${i * 0.08}s` }} className={`${card} cs-skel space-y-4 p-5`}>
         <div className="flex items-center gap-3.5">
-          <div className="h-12 w-12 rounded-xl bg-slate-100" />
-          <div className="flex-1 space-y-2"><div className="h-3.5 w-2/3 rounded bg-slate-100" /><div className="h-3 w-1/3 rounded bg-slate-50" /></div>
+          <div className="h-12 w-12 rounded-full bg-slate-100" />
+          <div className="flex-1 space-y-2"><div className="h-3.5 w-2/3 rounded bg-slate-100" /><div className="h-3 w-1/3 rounded bg-slate-100" /></div>
         </div>
-        <div className="h-24 rounded-xl bg-slate-50" />
-        <div className="h-10 rounded-xl bg-slate-100" />
+        <div className="h-20 rounded-lg bg-slate-100" />
+        <div className="h-10 rounded-lg bg-slate-100" />
       </div>
     ))}
   </div>
+);
+
+/* ═════════════ Módulo de filtros ═════════════ */
+const Modulo = ({ icon: Icon, titulo, className = '', children }) => (
+  <div className={`p-5 ${className}`}>
+    <div className="mb-3.5 flex items-center gap-2 text-[12px] font-bold text-slate-700">
+      <Icon className="h-3.5 w-3.5 text-slate-400" /> {titulo}
+    </div>
+    {children}
+  </div>
+);
+
+const Chip = ({ activo, onClick, punto, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={activo}
+    className={`cs-press ${fv} flex cursor-pointer items-center gap-2 rounded-full border px-3.5 py-1.5 text-[12px] font-semibold ${
+      activo ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+    }`}
+  >
+    {punto && <i className={`h-2 w-2 rounded-full ${punto} ${activo ? 'ring-2 ring-white/70' : ''}`} />}
+    {children}
+  </button>
 );
 
 /* ═════════════ Modal de confirmación ═════════════ */
@@ -496,30 +897,32 @@ function ModalEmision({ alumno, procesando, onConfirmar, onCancelar }) {
   const info = calcular(alumno);
   return (
     <div className="cs-fade fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={() => !procesando && onCancelar()}>
-      <div role="dialog" aria-modal="true" className="cs-modal w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(ev) => ev.stopPropagation()}>
-        <div className="relative bg-gradient-to-br from-blue-700 to-blue-500 px-6 py-6 text-white">
-          <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10" />
-          <span className="relative grid h-12 w-12 place-items-center rounded-2xl bg-white/20"><FiAward className="h-6 w-6" /></span>
-          <h3 className="relative mt-3 text-[17px] font-extrabold">Emitir constancia EFSRT</h3>
-          <p className="relative text-[12px] text-blue-100">Esta acción registra el documento de forma oficial.</p>
+      <div role="dialog" aria-modal="true" className="cs-modal w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(ev) => ev.stopPropagation()}>
+        <div className="flex items-start gap-3.5 border-b border-slate-100 px-6 py-5">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-blue-600 shadow-sm"><FiAward className="h-5 w-5" /></span>
+          <div>
+            <h3 className="text-[16px] font-extrabold text-slate-900">Emitir constancia EFSRT</h3>
+            <p className="mt-0.5 text-[12px] text-slate-500">Esta acción registra el documento oficial del {MODULOS_INFO[alumno.moduloKey]?.corto || 'módulo'}.</p>
+          </div>
         </div>
         <div className="space-y-4 p-6">
-          <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
+          <div className="flex items-center gap-3 rounded-xl border border-slate-200 p-3.5">
             <Avatar e={alumno} size="h-11 w-11 text-[12px]" />
             <div className="min-w-0">
               <p className="truncate text-[13px] font-bold text-slate-900">{alumno.nombre}</p>
-              <p className="text-[11px] text-slate-500">DNI {alumno.dni} · {alumno.modulo}</p>
+              <p className="truncate text-[11px] text-slate-500">DNI {alumno.dni} · {alumno.modulo}</p>
+              <p className="truncate text-[11px] text-slate-400">Empresa: {alumno.empresa}</p>
             </div>
           </div>
           <ul className="space-y-2 text-[12px]">
-            <li className="flex items-center gap-2 text-slate-600"><FiCheckCircle className="h-4 w-4 text-emerald-500" /> {info.horas} / {HORAS_META} horas acreditadas</li>
-            <li className="flex items-center gap-2 text-slate-600"><FiShield className="h-4 w-4 text-emerald-500" /> Cumple el requisito de horas para emitir</li>
+            <li className="flex items-center gap-2 text-slate-600"><FiCheckCircle className="h-4 w-4 text-emerald-500" /> {info.horas} / {info.meta} horas acreditadas</li>
+            <li className="flex items-center gap-2 text-slate-600"><FiShield className="h-4 w-4 text-emerald-500" /> Portafolio: {alumno.estado_portafolio}{alumno.nota != null ? ` · Nota: ${Number(alumno.nota).toFixed(2)}/20` : ''}</li>
           </ul>
           <div className="grid grid-cols-2 gap-3 pt-1">
-            <button onClick={onCancelar} disabled={procesando} className="cs-press h-11 cursor-pointer rounded-xl border border-slate-200 text-[12px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            <button type="button" onClick={onCancelar} disabled={procesando} className={`cs-press ${fv} h-11 cursor-pointer rounded-lg border border-slate-200 text-[12px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50`}>
               Cancelar
             </button>
-            <button onClick={onConfirmar} disabled={procesando} className="cs-press flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 text-[12px] font-bold text-white shadow-lg shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-70">
+            <button type="button" onClick={onConfirmar} disabled={procesando} className={`cs-press ${fv} flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 text-[12px] font-bold text-white hover:bg-blue-700 disabled:opacity-70`}>
               {procesando ? <><FiLoader className="cs-spin h-4 w-4" /> Emitiendo...</> : <><FiCheckCircle className="h-4 w-4" /> Confirmar emisión</>}
             </button>
           </div>
@@ -539,36 +942,37 @@ function ModalImpresion({ lista, moduloLabel, rangoLabel, onConfirmar, onCancela
 
   return (
     <div className="cs-fade fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={onCancelar}>
-      <div role="dialog" aria-modal="true" className="cs-modal flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(ev) => ev.stopPropagation()}>
-        <div className="relative shrink-0 bg-gradient-to-br from-blue-700 to-blue-500 px-6 py-6 text-white">
-          <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10" />
-          <span className="relative grid h-12 w-12 place-items-center rounded-2xl bg-white/20"><FiPrinter className="h-6 w-6" /></span>
-          <h3 className="relative mt-3 text-[17px] font-extrabold">Imprimir constancias en lote</h3>
-          <p className="relative text-[12px] text-blue-100">Se generará una hoja A4 por cada constancia emitida.</p>
+      <div role="dialog" aria-modal="true" className="cs-modal flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(ev) => ev.stopPropagation()}>
+        <div className="flex shrink-0 items-start gap-3.5 border-b border-slate-100 px-6 py-5">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-blue-600 shadow-sm"><FiPrinter className="h-5 w-5" /></span>
+          <div>
+            <h3 className="text-[16px] font-extrabold text-slate-900">Imprimir constancias en lote</h3>
+            <p className="mt-0.5 text-[12px] text-slate-500">Se generará una hoja A4 por cada constancia emitida.</p>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
-          <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="grid grid-cols-3 divide-x divide-slate-200 rounded-xl border border-slate-200 text-center">
             {[
               ['Constancias', lista.length],
               ['Módulo', moduloLabel],
               ['Fechas', rangoLabel],
             ].map(([k, v]) => (
-              <div key={k} className="rounded-2xl border border-slate-200 bg-slate-50 px-2 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{k}</p>
+              <div key={k} className="px-2 py-3">
+                <p className="text-[11px] text-slate-400">{k}</p>
                 <p className="mt-1 text-[12px] font-bold leading-tight text-slate-900">{v}</p>
               </div>
             ))}
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
+          <div className="overflow-hidden rounded-xl border border-slate-200">
             <div className="max-h-52 divide-y divide-slate-100 overflow-y-auto">
               {lista.map((e, i) => (
-                <div key={e.exp || e.dni} style={{ animationDelay: `${Math.min(i, 12) * 0.03}s` }} className="cs-up flex items-center gap-3 px-3.5 py-2.5">
+                <div key={`${e.id_estudiante}-${e.id_modulo}-${e.exp}-${i}`} style={{ animationDelay: `${Math.min(i, 12) * 0.03}s` }} className="cs-up flex items-center gap-3 px-3.5 py-2.5">
                   <Avatar e={e} size="h-8 w-8 text-[10px]" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[12px] font-bold text-slate-900">{e.nombre}</p>
-                    <p className="text-[11px] text-slate-400">DNI {e.dni}</p>
+                    <p className="text-[11px] text-slate-400">DNI {e.dni} · {e.empresa} · {MODULOS_INFO[e.moduloKey]?.corto}</p>
                   </div>
                   <span className="whitespace-nowrap text-[11px] font-medium text-slate-500">{formatearFecha(fechaDe(e))}</span>
                 </div>
@@ -576,17 +980,17 @@ function ModalImpresion({ lista, moduloLabel, rangoLabel, onConfirmar, onCancela
             </div>
           </div>
 
-          <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[11px] text-amber-800">
-            <FiAlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p className="flex items-start gap-2 text-[11px] text-slate-500">
+            <FiAlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
             Se abrirá una ventana nueva con el diálogo de impresión. Si tu navegador la bloquea, permite las ventanas emergentes para este sitio.
           </p>
         </div>
 
         <div className="grid shrink-0 grid-cols-2 gap-3 border-t border-slate-100 p-5">
-          <button onClick={onCancelar} className="cs-press h-11 cursor-pointer rounded-xl border border-slate-200 text-[12px] font-bold text-slate-700 hover:bg-slate-50">
+          <button type="button" onClick={onCancelar} className={`cs-press ${fv} h-11 cursor-pointer rounded-lg border border-slate-200 text-[12px] font-bold text-slate-700 hover:bg-slate-50`}>
             Cancelar
           </button>
-          <button onClick={onConfirmar} className="cs-press flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 text-[12px] font-bold text-white shadow-lg shadow-blue-600/25 hover:bg-blue-700">
+          <button type="button" onClick={onConfirmar} className={`cs-press ${fv} flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 text-[12px] font-bold text-white hover:bg-blue-700`}>
             <FiPrinter className="h-4 w-4" /> Imprimir {lista.length}
           </button>
         </div>
@@ -595,22 +999,49 @@ function ModalImpresion({ lista, moduloLabel, rangoLabel, onConfirmar, onCancela
   );
 }
 
-/* ═════════════ Datos de respaldo ═════════════ */
-const RESPALDO = [
-  {
-    id_estudiante: 1, id_modulo: 2, fecha_emision: '2026-10-15', nombre: 'Carlos Alberto Pérez Gómez', dni: '72345678', exp: '#EXP-2026-0841',
-    ini: 'CP', estado: 'Constancia Emitida', modulo: 'Diseño y Programación Web', moduloKey: 'desarrollo',
-    nota: 'Acreditación completada', empresa: 'TechLab Soluciones S.A.C.', asesor: 'Julio César Gutarra Ramos', hrs: 480,
-  },
-  {
-    id_estudiante: 2, id_modulo: 2, fecha_emision: '2026-11-12', nombre: 'Alexis Yeshua Félix Córdova', dni: '61061388', exp: '#EXP-2026-0839',
-    ini: 'AF', estado: 'Constancia Emitida', modulo: 'Diseño y Programación Web', moduloKey: 'desarrollo',
-    nota: 'Acreditación completada', empresa: 'WORLDNIC Tech', asesor: 'Julio César Gutarra Ramos', hrs: 480,
-  },
-];
-
 /* ═════════════ Pantalla principal ═════════════ */
 export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }) {
+  const cachedConstancias = getCachedData('/constancias-efsrt');
+  const cachedEstudiantes = getCachedData('/estudiantes?all=true') || getCachedData('/estudiantes');
+  const cachedExpedientes = getCachedData('/expedientes');
+
+  const construirListaUnificada = useCallback((rawConstancias, rawEstudiantes, rawExpedientes) => {
+    const estudiantesMap = new Map();
+    rawEstudiantes.forEach((est) => {
+      const idKey = String(est.id_estudiante ?? est.id ?? '');
+      if (idKey) estudiantesMap.set(idKey, est);
+      if (est.dni) estudiantesMap.set(String(est.dni).trim(), est);
+    });
+
+    const expedientesMap = new Map();
+    rawExpedientes.forEach((exp) => {
+      const idKey = String(exp.id_estudiante ?? exp.estudiante_id ?? '');
+      if (idKey) expedientesMap.set(idKey, exp);
+      if (exp.dni) expedientesMap.set(String(exp.dni).trim(), exp);
+    });
+
+    const fuente =
+      rawConstancias.length > 0
+        ? rawConstancias
+        : rawExpedientes.length > 0
+        ? rawExpedientes
+        : rawEstudiantes;
+
+    return fuente
+      .map((item, idx) => normalizarRegistro(item, idx, expedientesMap, estudiantesMap))
+      .filter(estaCumplidoYListoParaConstancia);
+  }, []);
+
+  const initialRegistros = useMemo(
+    () =>
+      construirListaUnificada(
+        extraerArreglo(cachedConstancias),
+        extraerArreglo(cachedEstudiantes),
+        extraerArreglo(cachedExpedientes)
+      ),
+    [cachedConstancias, cachedEstudiantes, cachedExpedientes, construirListaUnificada]
+  );
+
   const [vista, setVista] = useState('tarjetas');
   const [busqueda, setBusqueda] = useState('');
   const [modulo, setModulo] = useState('todos');
@@ -620,14 +1051,17 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
   const [hasta, setHasta] = useState('');
   const [pagina, setPagina] = useState(1);
 
-  const [expedientes, setExpedientes] = useState([]);
-  const [cargando, setCargando] = useState(true);
+  const [expedientes, setExpedientes] = useState(initialRegistros);
+  const [cargando, setCargando] = useState(initialRegistros.length === 0);
   const [procesandoId, setProcesandoId] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [confirmandoImpresion, setConfirmandoImpresion] = useState(false);
+  const [constanciaPDFActiva, setConstanciaPDFActiva] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const mostrarToast = (tipo, texto) => setToast({ tipo, texto, id: Date.now() });
+  const mostrarToast = useCallback((tipo, texto) => {
+    setToast({ tipo, texto, id: Date.now() });
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -635,69 +1069,259 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
     return () => clearTimeout(t);
   }, [toast]);
 
-  const cargar = useCallback(() => {
-    let activo = true;
-    setCargando(true);
-    fetch('/api/constancias-efsrt', {
-      headers: { Accept: 'application/json', Authorization: 'Bearer ' + (localStorage.getItem('token') || '') },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error('Error al conectar con la API');
-        return res.json();
-      })
-      .then((data) => {
-        if (!activo) return;
-        const lista = Array.isArray(data) ? data : (data.expedientes || data.data || []);
-        setExpedientes(lista.length > 0 ? lista : RESPALDO);
-        setCargando(false);
-      })
-      .catch(() => {
-        if (!activo) return;
-        setExpedientes(RESPALDO);
-        setCargando(false);
-      });
-    return () => { activo = false; };
+  const handleAbrirVistaConstancia = useCallback((estudiante) => {
+    if (!estudiante) return;
+
+    const vigente =
+      expedientes.find(
+        (item) =>
+          String(item.id_estudiante) === String(estudiante.id_estudiante) &&
+          Number(item.id_modulo) === Number(estudiante.id_modulo)
+      ) || estudiante;
+
+    const alumnoEmitido = {
+      ...vigente,
+      ...estudiante,
+      emitida: true,
+      estado: 'Constancia Emitida',
+      codigo_documento:
+        estudiante.codigo_documento ||
+        vigente.codigo_documento ||
+        vigente.exp ||
+        `CONST-EFSRT-2026-${String(vigente.id_estudiante).padStart(4, '0')}`,
+      fecha_emision:
+        estudiante.fecha_emision ||
+        vigente.fecha_emision ||
+        aISO(new Date()),
+    };
+
+    try {
+      sessionStorage.setItem('constancia_pdf_actual', JSON.stringify(alumnoEmitido));
+      localStorage.setItem('constancia_pdf_actual', JSON.stringify(alumnoEmitido));
+    } catch {
+      // Ignorar restricciones de storage
+    }
+
+    window.dispatchEvent(
+      new CustomEvent('constancia-pdf:abrir', { detail: alumnoEmitido })
+    );
+
+    if (typeof onVerConstancia === 'function') {
+      onVerConstancia(alumnoEmitido);
+      return;
+    }
+
+    setConstanciaPDFActiva(alumnoEmitido);
+  }, [expedientes, onVerConstancia]);
+
+  const solicitarEmision = useCallback((estudiante) => {
+    if (!estudiante) return;
+    if (tieneConstanciaYaEmitida(estudiante)) {
+      mostrarToast(
+        'error',
+        `La constancia de ${estudiante.nombre} en ${MODULOS_INFO[estudiante.moduloKey]?.corto || 'este módulo'} ya fue emitida o registrada. Solo puedes ver la constancia.`
+      );
+      return;
+    }
+    setConfirmando(estudiante);
+  }, [mostrarToast]);
+
+  const handleVerExpediente = useCallback((estudiante) => {
+    if (!estudiante) return;
+
+    const vigente =
+      expedientes.find(
+        (item) =>
+          String(item.id_estudiante) === String(estudiante.id_estudiante) &&
+          Number(item.id_modulo) === Number(estudiante.id_modulo)
+      ) || estudiante;
+
+    const guardadoLocal = buscarDatosGuardadosModulo(vigente.id_estudiante, vigente.id_modulo) || {};
+
+    const alumnoActualizado = {
+      ...vigente,
+      ...guardadoLocal,
+      id_estudiante: vigente.id_estudiante,
+      id_expediente: guardadoLocal.id_expediente ?? vigente.id_expediente,
+      id_modulo: vigente.id_modulo,
+      codigo_expediente: guardadoLocal.codigo_expediente ?? vigente.exp,
+      exp: guardadoLocal.exp ?? vigente.exp,
+      hrs: guardadoLocal.hrs ?? vigente.hrs,
+      estado: guardadoLocal.estado ?? vigente.estado,
+      nota: guardadoLocal.nota ?? vigente.nota,
+      fecha_emision: guardadoLocal.fecha_emision ?? vigente.fecha_emision,
+      _refresco: Date.now(),
+    };
+
+    clearApiCache();
+
+    try {
+      sessionStorage.setItem('expediente_alumno_actual', JSON.stringify(alumnoActualizado));
+      localStorage.setItem('expediente_alumno_actual', JSON.stringify(alumnoActualizado));
+    } catch {
+      // Ignorar restricciones de storage
+    }
+
+    if (typeof onSeleccionarEstudiante === 'function') {
+      onSeleccionarEstudiante(alumnoActualizado);
+    }
+
+    window.dispatchEvent(
+      new CustomEvent('expediente-alumno:abrir', { detail: alumnoActualizado })
+    );
+  }, [expedientes, onSeleccionarEstudiante]);
+
+  const cargar = useCallback(async ({ forzarRefresco = false } = {}) => {
+    if (forzarRefresco) {
+      clearApiCache();
+    }
+    if (forzarRefresco || expedientes.length === 0) {
+      setCargando(true);
+    }
+
+    try {
+      const [resConstancias, resEstudiantes, resExpedientes] = await Promise.allSettled([
+        api.get('/constancias-efsrt'),
+        api.get('/estudiantes?all=true'),
+        api.get('/expedientes'),
+      ]);
+
+      const rawConstancias =
+        resConstancias.status === 'fulfilled' ? extraerArreglo(resConstancias.value?.data) : [];
+      const rawEstudiantes =
+        resEstudiantes.status === 'fulfilled' ? extraerArreglo(resEstudiantes.value?.data) : [];
+      const rawExpedientes =
+        resExpedientes.status === 'fulfilled' ? extraerArreglo(resExpedientes.value?.data) : [];
+
+      setExpedientes(construirListaUnificada(rawConstancias, rawEstudiantes, rawExpedientes));
+    } catch (err) {
+      console.error('Error al cargar constancias:', err);
+      if (expedientes.length === 0) {
+        setExpedientes([]);
+      }
+    } finally {
+      setCargando(false);
+    }
+  }, [expedientes.length, construirListaUnificada]);
+
+  useEffect(() => {
+    if (initialRegistros.length === 0) {
+      cargar({ forzarRefresco: false });
+    }
+    const alActualizar = () => cargar({ forzarRefresco: true });
+    window.addEventListener('expediente:actualizado', alActualizar);
+    return () => window.removeEventListener('expediente:actualizado', alActualizar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => cargar(), [cargar]);
-
   const handleEmitirConstancia = async (estudiante) => {
-    setProcesandoId(estudiante.id_estudiante);
+    if (!estudiante) return;
+
+    if (tieneConstanciaYaEmitida(estudiante)) {
+      setConfirmando(null);
+      mostrarToast(
+        'error',
+        `Ya se emitió o registró la constancia de ${estudiante.nombre} para este módulo. Solo puedes ver la constancia.`
+      );
+      return;
+    }
+
+    const claveProc = `${estudiante.id_estudiante}-${estudiante.id_modulo}`;
+    setProcesandoId(claveProc);
     try {
-      const response = await fetch('/api/constancias/generar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ id_estudiante: estudiante.id_estudiante, id_modulo: estudiante.id_modulo || 2, tipo_emision: 'Original' }),
+      const response = await api.post('/constancias/generar', {
+        id_estudiante: estudiante.id_estudiante,
+        id_modulo: estudiante.id_modulo,
+        id_expediente: estudiante.id_expediente || null,
+        tipo_emision: 'Original',
       });
-      const resData = await response.json();
-      if (response.ok) {
-        const docGenerado = resData.data?.codigo_documento || resData.constancia?.codigo_documento || '#CONST-GEN';
+      const resData = response.data || {};
+      const constanciaObj = resData.constancia || resData.data || {};
+      const docGenerado =
+        constanciaObj.codigo_documento ||
+        resData.codigo_documento ||
+        `#CONST-M${estudiante.id_modulo}-${String(estudiante.id_estudiante).padStart(4, '0')}`;
+      const fechaEmitida = (
+        constanciaObj.fecha_emision ||
+        resData.fecha_emision ||
+        estudiante.fecha_emision ||
+        aISO(new Date())
+      )
+        .toString()
+        .slice(0, 10);
+
+      clearApiCache();
+      setExpedientes((prev) =>
+        prev.map((item) =>
+          String(item.id_estudiante) === String(estudiante.id_estudiante) &&
+          Number(item.id_modulo) === Number(estudiante.id_modulo)
+            ? {
+                ...item,
+                id_constancia: constanciaObj.id_constancia ?? item.id_constancia ?? true,
+                emitida: true,
+                estado: 'Constancia Emitida',
+                exp: docGenerado,
+                codigo_documento: docGenerado,
+                fecha_emision: fechaEmitida,
+              }
+            : item
+        )
+      );
+      mostrarToast('ok', `Constancia del ${MODULOS_INFO[estudiante.moduloKey]?.corto} emitida para ${estudiante.nombre}. Ahora puedes Ver Constancia.`);
+    } catch (err) {
+      const dataErr = err?.response?.data || {};
+      const yaEmitida =
+        err?.response?.status === 409 ||
+        Boolean(dataErr.already_issued) ||
+        String(dataErr.message || '').toLowerCase().includes('ya se emitió') ||
+        String(dataErr.message || '').toLowerCase().includes('ya cuenta con una constancia');
+
+      if (yaEmitida) {
+        const constExistente = dataErr.constancia || dataErr.data || {};
+        const docExistente =
+          constExistente.codigo_documento ||
+          estudiante.codigo_documento ||
+          estudiante.exp ||
+          `#CONST-M${estudiante.id_modulo}-${String(estudiante.id_estudiante).padStart(4, '0')}`;
+
         setExpedientes((prev) =>
           prev.map((item) =>
-            item.id_estudiante === estudiante.id_estudiante
-              ? { ...item, estado: 'Constancia Emitida', exp: docGenerado, codigo_documento: docGenerado }
+            String(item.id_estudiante) === String(estudiante.id_estudiante) &&
+            Number(item.id_modulo) === Number(estudiante.id_modulo)
+              ? {
+                  ...item,
+                  id_constancia: constExistente.id_constancia ?? item.id_constancia ?? true,
+                  emitida: true,
+                  estado: 'Constancia Emitida',
+                  exp: docExistente,
+                  codigo_documento: docExistente,
+                  fecha_emision: (
+                    constExistente.fecha_emision ||
+                    item.fecha_emision ||
+                    aISO(new Date())
+                  )
+                    .toString()
+                    .slice(0, 10),
+                }
               : item
           )
         );
-        mostrarToast('ok', `Constancia emitida para ${estudiante.nombre}.`);
-      } else {
-        mostrarToast('error', resData.message || 'No se pudo generar la constancia.');
       }
-    } catch {
-      mostrarToast('error', 'Error de conexión al emitir la constancia.');
+
+      const mensaje = dataErr.message || 'No se pudo generar la constancia.';
+      mostrarToast('error', mensaje);
     } finally {
       setProcesandoId(null);
       setConfirmando(null);
     }
   };
 
-  // Base: búsqueda + módulo (para que los contadores de las pestañas sean coherentes)
   const base = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     return expedientes.filter(
       (e) =>
         (modulo === 'todos' || e.moduloKey === modulo) &&
-        (!q || [e.nombre, e.dni, e.exp].some((t) => (t || '').toLowerCase().includes(q))) &&
+        (!q || [e.nombre, e.dni, e.exp, e.modulo, e.empresa].some((t) => (t || '').toLowerCase().includes(q))) &&
         dentroDeRango(e, desde, hasta)
     );
   }, [expedientes, busqueda, modulo, desde, hasta]);
@@ -708,7 +1332,6 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
     return c;
   }, [base]);
 
-  // Constancias emitidas que cumplen módulo + fechas + búsqueda (todas las páginas, no solo la visible)
   const paraImprimir = useMemo(() => base.filter((e) => calcular(e).emitida), [base]);
   const moduloLabel = OPC_MODULO.find(([k]) => k === modulo)?.[1] || 'Todos los Módulos';
   const rangoLabel =
@@ -743,7 +1366,8 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
   useEffect(() => { if (pagina > totalPaginas) setPagina(totalPaginas); }, [totalPaginas, pagina]);
   const lista = filtrada.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
-  const hayFiltros = busqueda || modulo !== 'todos' || estado !== 'todos' || desde || hasta;
+  const nFiltros = (busqueda ? 1 : 0) + (modulo !== 'todos' ? 1 : 0) + (estado !== 'todos' ? 1 : 0) + (desde || hasta ? 1 : 0);
+  const hayFiltros = nFiltros > 0;
   const limpiar = () => { setBusqueda(''); setModulo('todos'); setEstado('todos'); setDesde(''); setHasta(''); };
   const aplicarPreset = (k) => {
     const [d, h] = rangoPreset(k);
@@ -752,207 +1376,219 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
     setHasta(yaActivo ? '' : h);
   };
 
-  const emitidas = expedientes.filter((e) => e.estado === 'Constancia Emitida').length;
+  const emitidas = expedientes.filter((e) => calcular(e).emitida).length;
   const aptos = expedientes.filter((e) => calcular(e).apto).length;
   const pctEmitidas = expedientes.length ? Math.round((emitidas / expedientes.length) * 100) : 0;
+  const idxTab = Math.max(0, TABS.findIndex(([k]) => k === estado));
+
+  if (constanciaPDFActiva && typeof onVerConstancia !== 'function') {
+    return (
+      <VistaConstanciaPDF
+        estudiante={constanciaPDFActiva}
+        onVolver={() => setConstanciaPDFActiva(null)}
+      />
+    );
+  }
 
   return (
-    <div className="w-full bg-slate-50/60 px-4 py-5 text-slate-900" style={{ fontFamily: "'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif" }}>
+    <div className="w-full px-4 py-6 text-slate-900" style={{ fontFamily: "'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif" }}>
       <style>{ESTILOS}</style>
 
-      <div className="mx-auto max-w-[1400px] space-y-5">
-        {/* Encabezado */}
+      <div className="w-full space-y-6">
         <header className="cs-up flex flex-wrap items-end justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-blue-600">
-              <span className="h-px w-6 bg-blue-600" /> Gestión académica
-            </div>
-            <h1 className="mt-1.5 text-[24px] font-extrabold leading-tight tracking-tight">Constancias EFSRT</h1>
+            <p className="flex items-center gap-1.5 text-[12px] text-slate-400">
+              Gestión académica <span aria-hidden="true">/</span> <span className="font-semibold text-slate-600">Constancias</span>
+            </p>
+            <h1 className="mt-1 text-[26px] font-extrabold leading-tight tracking-tight">Constancias EFSRT</h1>
             <p className="mt-1 max-w-2xl text-[12px] text-slate-500">
-              Emisión y control institucional de constancias de Experiencias Formativas en Situaciones Reales de Trabajo.
+              Estudiantes que cumplieron su práctica y están listos para constancia o ya emitidos en Módulo I, Módulo II y Módulo III.
             </p>
           </div>
           <div className="flex items-center gap-2.5">
-            <span className="rounded-full border border-slate-200 bg-white px-3.5 py-2 text-[11px] font-bold text-slate-600 shadow-sm">Periodo 2026-I</span>
+            <span className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-[12px] font-bold text-slate-600">Periodo 2026-I</span>
             <button
-              onClick={cargar}
+              type="button"
+              onClick={() => cargar({ forzarRefresco: true })}
               disabled={cargando}
-              className="cs-press flex h-9 cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 text-[11px] font-bold text-slate-700 shadow-sm hover:border-blue-500 hover:text-blue-600 disabled:opacity-60"
+              className={`cs-press ${fv} flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-[12px] font-bold text-slate-700 hover:border-blue-500 hover:text-blue-600 disabled:opacity-60`}
             >
               <FiRefreshCw className={`h-3.5 w-3.5 ${cargando ? 'cs-spin' : ''}`} /> Actualizar
             </button>
           </div>
         </header>
 
-        {/* KPIs */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Kpi delay={0.05} icon={FiFileText} valor={expedientes.length} label="Expedientes" detalle="En seguimiento" tono={{ fondo: 'bg-blue-50', texto: 'text-blue-600' }} />
-          <Kpi delay={0.1} icon={FiAward} valor={emitidas} label="Constancias emitidas" detalle="Del total de expedientes" anillo={pctEmitidas} tono={{ fondo: 'bg-emerald-50', texto: 'text-emerald-600' }} />
-          <Kpi delay={0.15} icon={FiCheckCircle} valor={aptos} label="Aptos para emitir" detalle="Listos para constancia" tono={{ fondo: 'bg-amber-50', texto: 'text-amber-600' }} />
+          <Kpi delay={0.04} icon={FiFileText} valor={expedientes.length} label="Listos / Emitidos" detalle="Práctica cumplida" color="text-blue-600" />
+          <Kpi delay={0.08} icon={FiAward} valor={emitidas} label="Constancias emitidas" detalle="Culminadas y registradas" anillo={pctEmitidas} color="text-emerald-600" />
+          <Kpi delay={0.12} icon={FiCheckCircle} valor={aptos} label="Aptos para emitir" detalle="Listos para constancia" color="text-amber-600" />
         </div>
 
-        {/* Barra de herramientas */}
-        <div style={{ animationDelay: '.2s' }} className={`${card} cs-up space-y-3.5 p-4`}>
-          {/* Pestañas de estado */}
-          <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-slate-100 p-1">
-            {TABS.map(([k, label]) => {
-              const activa = estado === k;
-              return (
-                <button
-                  key={k}
-                  onClick={() => setEstado(k)}
-                  className={`cs-press flex cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-[12px] font-bold ${activa ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                >
-                  {label}
-                  <span className={`min-w-[20px] rounded-full px-1.5 py-0.5 text-center text-[10px] font-extrabold transition-colors ${activa ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                    {conteos[k] ?? 0}
-                  </span>
-                </button>
-              );
-            })}
+        <section aria-label="Filtros" style={{ animationDelay: '.16s' }} className={`${card} cs-up overflow-hidden`}>
+          <div className="flex items-center gap-2.5 border-b border-slate-200 px-5 py-3">
+            <FiFilter className="h-4 w-4 text-slate-400" />
+            <h2 className="text-[13px] font-bold">Filtros</h2>
+            {hayFiltros && <span className="cs-pop rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{nFiltros}</span>}
+            <span className="ml-auto text-[12px] text-slate-400">
+              <b className="text-slate-700">{filtrada.length}</b> {filtrada.length === 1 ? 'resultado' : 'resultados'}
+            </span>
+            {hayFiltros && (
+              <button type="button" onClick={limpiar} className={`cs-fade flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[12px] font-bold text-blue-600 hover:bg-slate-50 hover:text-blue-700 ${fv}`}>
+                <FiX className="h-3 w-3" /> Limpiar
+              </button>
+            )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex h-10 min-w-[220px] flex-1 items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 text-slate-400 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10">
-              <FiSearch className="h-4 w-4" />
-              <input
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar por alumno, DNI o código de expediente..."
-                className="w-full bg-transparent text-[12px] text-slate-900 outline-none"
-              />
-              {busqueda && (
-                <button onClick={() => setBusqueda('')} className="cursor-pointer text-slate-400 hover:text-slate-900" aria-label="Borrar búsqueda">
-                  <FiX className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-            <Select value={modulo} onChange={setModulo} opciones={OPC_MODULO} w="w-[200px]" />
-            <Select value={orden} onChange={setOrden} opciones={OPC_ORDEN} w="w-[190px]" icon={FiArrowUp} />
-            <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+          <div className="grid grid-cols-1 lg:grid-cols-12">
+            <Modulo icon={FiSearch} titulo="Búsqueda" className="lg:col-span-5">
+              <div className="flex h-10 items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-3.5 text-slate-400 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10">
+                <FiSearch className="h-4 w-4 shrink-0" />
+                <input
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="Alumno, DNI, empresa o expediente"
+                  aria-label="Buscar expedientes"
+                  className="w-full bg-transparent text-[12px] text-slate-900 outline-none placeholder:text-slate-400"
+                />
+                {busqueda && (
+                  <button type="button" onClick={() => setBusqueda('')} className="cursor-pointer text-slate-400 hover:text-slate-900" aria-label="Borrar búsqueda">
+                    <FiX className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </Modulo>
+
+            <Modulo icon={FiCheckCircle} titulo="Estado" className="border-t border-slate-200 lg:col-span-7 lg:border-l lg:border-t-0">
+              <div role="tablist" aria-label="Estado" className="relative grid grid-cols-4 border-b border-slate-200">
+                {TABS.map(([k, label]) => {
+                  const activa = estado === k;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      role="tab"
+                      aria-selected={activa}
+                      onClick={() => setEstado(k)}
+                      className={`cursor-pointer rounded-t-md px-1 pb-2.5 text-left transition-colors ${fv} ${activa ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'}`}
+                    >
+                      <span className="block text-[20px] font-extrabold leading-none tabular-nums">{conteos[k] ?? 0}</span>
+                      <span className={`mt-1 block text-[11px] font-semibold ${activa ? 'text-blue-600' : ''}`}>{label}</span>
+                    </button>
+                  );
+                })}
+                <span
+                  aria-hidden="true"
+                  className="absolute -bottom-px left-0 h-0.5 w-1/4 rounded-full bg-blue-600 transition-transform duration-300 ease-out"
+                  style={{ transform: `translateX(${idxTab * 100}%)` }}
+                />
+              </div>
+            </Modulo>
+
+            <Modulo icon={FiLayers} titulo="Módulo formativo" className="border-t border-slate-200 lg:col-span-5">
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Módulo formativo">
+                {CHIPS_MODULO.map(([k, label, punto]) => (
+                  <Chip key={k} activo={modulo === k} punto={punto} onClick={() => setModulo(k)}>{label}</Chip>
+                ))}
+              </div>
+            </Modulo>
+
+            <Modulo icon={FiCalendar} titulo="Fecha de emisión" className="border-t border-slate-200 lg:col-span-7 lg:border-l">
+              <div className="flex flex-wrap items-center gap-2">
+                {PRESETS_FECHA.map(([k, label]) => {
+                  const [d, h] = rangoPreset(k);
+                  return <Chip key={k} activo={desde === d && hasta === h} onClick={() => aplicarPreset(k)}>{label}</Chip>;
+                })}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                <label className="flex items-center gap-2 text-[12px] font-medium text-slate-500">
+                  Desde
+                  <input
+                    type="date"
+                    value={desde}
+                    max={hasta || undefined}
+                    onChange={(e) => setDesde(e.target.value)}
+                    className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-[12px] font-medium text-slate-500">
+                  Hasta
+                  <input
+                    type="date"
+                    value={hasta}
+                    min={desde || undefined}
+                    onChange={(e) => setHasta(e.target.value)}
+                    className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                  />
+                </label>
+                {(desde || hasta) && (
+                  <button
+                    type="button"
+                    onClick={() => { setDesde(''); setHasta(''); }}
+                    className={`cs-pop cs-press ${fv} grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-400 hover:border-rose-300 hover:text-rose-500`}
+                    aria-label="Quitar filtro de fecha"
+                  >
+                    <FiX className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </Modulo>
+          </div>
+        </section>
+
+        <div style={{ animationDelay: '.2s' }} className="cs-up flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[14px] font-bold">
+            Expedientes listos / emitidos <span className="ml-1 font-medium text-slate-400">{filtrada.length}</span>
+          </p>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Select value={orden} onChange={setOrden} opciones={OPC_ORDEN} w="w-[190px]" icon={FiArrowUp} etiqueta="Ordenar por" />
+            <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
               {[['tarjetas', FiGrid, 'Tarjetas'], ['tabla', FiList, 'Tabla']].map(([k, Icon, t]) => (
                 <button
                   key={k}
+                  type="button"
                   onClick={() => setVista(k)}
-                  className={`cs-press flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3.5 text-[12px] font-bold ${vista === k ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+                  aria-pressed={vista === k}
+                  className={`cs-press ${fv} flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-3.5 text-[12px] font-bold ${vista === k ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-900'}`}
                 >
                   <Icon className="h-3.5 w-3.5" /> {t}
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* Filtro por fecha */}
-          <div className="flex flex-wrap items-center gap-2.5 border-t border-slate-100 pt-3.5">
-            <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              <FiCalendar className="h-3.5 w-3.5" /> Fecha
-            </span>
-            {PRESETS_FECHA.map(([k, label]) => {
-              const [d, h] = rangoPreset(k);
-              const activo = desde === d && hasta === h;
-              return (
-                <button
-                  key={k}
-                  onClick={() => aplicarPreset(k)}
-                  className={`cs-press cursor-pointer rounded-full border px-3 py-1.5 text-[11px] font-bold ${
-                    activo
-                      ? 'border-blue-600 bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-blue-500 hover:text-blue-600'
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-500">
-                Desde
-                <input
-                  type="date"
-                  value={desde}
-                  max={hasta || undefined}
-                  onChange={(e) => setDesde(e.target.value)}
-                  className="h-9 cursor-pointer rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-500">
-                Hasta
-                <input
-                  type="date"
-                  value={hasta}
-                  min={desde || undefined}
-                  onChange={(e) => setHasta(e.target.value)}
-                  className="h-9 cursor-pointer rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                />
-              </label>
-              {(desde || hasta) && (
-                <button
-                  onClick={() => { setDesde(''); setHasta(''); }}
-                  className="cs-pop cs-press grid h-9 w-9 cursor-pointer place-items-center rounded-xl border border-slate-200 text-slate-400 hover:border-rose-300 hover:text-rose-500"
-                  aria-label="Quitar filtro de fecha"
-                >
-                  <FiX className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Impresión masiva por módulo y fechas */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/25">
-                <FiPrinter className="h-4 w-4" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-[12px] font-bold text-slate-900">Impresión masiva de constancias</p>
-                <p className="truncate text-[11px] text-slate-500">
-                  <b className="text-blue-700">{paraImprimir.length}</b> emitida(s) · {moduloLabel} · {rangoLabel}
-                </p>
-              </div>
-            </div>
             <button
+              type="button"
               onClick={() => setConfirmandoImpresion(true)}
               disabled={paraImprimir.length === 0}
-              className="cs-press flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-4 text-[12px] font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+              title={`${paraImprimir.length} emitida(s) · ${moduloLabel} · ${rangoLabel}`}
+              className={`cs-press ${fv} flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-blue-600 px-4 text-[12px] font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
             >
-              <FiPrinter className="h-3.5 w-3.5" /> Imprimir todas ({paraImprimir.length})
+              <FiPrinter className="h-3.5 w-3.5" /> Imprimir emitidas ({paraImprimir.length})
             </button>
           </div>
-
-          {hayFiltros && (
-            <div className="cs-fade flex items-center justify-between border-t border-slate-100 pt-3">
-              <span className="text-[11px] text-slate-500">{filtrada.length} resultado(s) con los filtros aplicados</span>
-              <button onClick={limpiar} className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-blue-600 hover:text-blue-700">
-                <FiX className="h-3 w-3" /> Limpiar filtros
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Contenido */}
-        {cargando ? (
+        {cargando && expedientes.length === 0 ? (
           <Esqueleto />
         ) : filtrada.length === 0 ? (
           <div className={`${card} cs-pop py-16 text-center`}>
-            <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-blue-600"><FiSearch className="h-6 w-6" /></span>
-            <p className="mt-3 text-[14px] font-bold">No se encontraron expedientes</p>
-            <p className="text-[12px] text-slate-400">Prueba con otro alumno, DNI o limpia los filtros.</p>
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full border border-slate-200 text-blue-600"><FiSearch className="h-6 w-6" /></span>
+            <p className="mt-3 text-[14px] font-bold">No hay estudiantes listos para constancia</p>
+            <p className="text-[12px] text-slate-400">Aparecerán aquí los practicantes que cumplieron su práctica y están verificados/aptos o con constancia emitida.</p>
             {hayFiltros && (
-              <button onClick={limpiar} className="cs-press mt-4 cursor-pointer rounded-xl bg-blue-600 px-4 py-2 text-[12px] font-bold text-white hover:bg-blue-700">
+              <button type="button" onClick={limpiar} className={`cs-press ${fv} mt-4 cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-[12px] font-bold text-white hover:bg-blue-700`}>
                 Limpiar filtros
               </button>
             )}
           </div>
         ) : vista === 'tarjetas' ? (
-          <div key={`t-${pagina}-${estado}-${orden}`} className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div key={`t-${pagina}-${estado}-${orden}`} className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
             {lista.map((e, i) => (
               <Tarjeta
-                key={e.exp || e.dni}
+                key={`${e.id_estudiante}-${e.id_modulo}-${e.exp}-${i}`}
                 e={e}
                 indice={i}
-                onSeleccionarEstudiante={onSeleccionarEstudiante}
-                onVerConstancia={onVerConstancia}
-                onPedirEmision={setConfirmando}
+                onVerExpediente={handleVerExpediente}
+                onVerConstancia={handleAbrirVistaConstancia}
+                onPedirEmision={solicitarEmision}
                 procesandoId={procesandoId}
               />
             ))}
@@ -961,14 +1597,13 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
           <TablaExpedientes
             key={`tb-${pagina}-${estado}-${orden}`}
             lista={lista}
-            onSeleccionarEstudiante={onSeleccionarEstudiante}
-            onVerConstancia={onVerConstancia}
-            onPedirEmision={setConfirmando}
+            onVerExpediente={handleVerExpediente}
+            onVerConstancia={handleAbrirVistaConstancia}
+            onPedirEmision={solicitarEmision}
             procesandoId={procesandoId}
           />
         )}
 
-        {/* Paginación */}
         {!cargando && filtrada.length > 0 && (
           <div className={`${card} flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-[12px] text-slate-500`}>
             <span>
@@ -976,29 +1611,33 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
             </span>
             <div className="flex items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => setPagina((p) => Math.max(1, p - 1))}
                 disabled={pagina === 1}
                 aria-label="Página anterior"
-                className="cs-press grid h-9 w-9 cursor-pointer place-items-center rounded-xl border border-slate-200 text-slate-500 hover:border-blue-500 hover:text-blue-600 disabled:cursor-default disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-500"
+                className={`cs-press ${fv} grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-500 hover:border-blue-500 hover:text-blue-600 disabled:cursor-default disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-500`}
               >
                 <FiChevronLeft className="h-4 w-4" />
               </button>
               {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((n) => (
                 <button
                   key={n}
+                  type="button"
                   onClick={() => setPagina(n)}
-                  className={`cs-press h-9 w-9 cursor-pointer rounded-xl text-[12px] font-bold ${
-                    n === pagina ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'border border-slate-200 text-slate-700 hover:border-blue-500 hover:text-blue-600'
+                  aria-current={n === pagina ? 'page' : undefined}
+                  className={`cs-press ${fv} h-9 w-9 cursor-pointer rounded-lg text-[12px] font-bold ${
+                    n === pagina ? 'bg-blue-600 text-white' : 'border border-slate-200 text-slate-700 hover:border-blue-500 hover:text-blue-600'
                   }`}
                 >
                   {n}
                 </button>
               ))}
               <button
+                type="button"
                 onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
                 disabled={pagina === totalPaginas}
                 aria-label="Página siguiente"
-                className="cs-press grid h-9 w-9 cursor-pointer place-items-center rounded-xl border border-slate-200 text-slate-500 hover:border-blue-500 hover:text-blue-600 disabled:cursor-default disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-500"
+                className={`cs-press ${fv} grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-500 hover:border-blue-500 hover:text-blue-600 disabled:cursor-default disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-500`}
               >
                 <FiChevronRight className="h-4 w-4" />
               </button>
@@ -1007,17 +1646,15 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
         )}
       </div>
 
-      {/* Modal de confirmación */}
-      {confirmando && (
+      {confirmando && !tieneConstanciaYaEmitida(confirmando) && (
         <ModalEmision
           alumno={confirmando}
-          procesando={procesandoId === confirmando.id_estudiante}
+          procesando={procesandoId === `${confirmando.id_estudiante}-${confirmando.id_modulo}`}
           onConfirmar={() => handleEmitirConstancia(confirmando)}
           onCancelar={() => setConfirmando(null)}
         />
       )}
 
-      {/* Modal de impresión masiva */}
       {confirmandoImpresion && (
         <ModalImpresion
           lista={paraImprimir}
@@ -1028,19 +1665,17 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
         />
       )}
 
-      {/* Notificación */}
       {toast && (
         <div
           key={toast.id}
-          className={`cs-toast fixed bottom-5 right-5 z-[60] flex max-w-sm items-center gap-3 rounded-2xl border px-4 py-3 text-[12px] font-semibold shadow-xl ${
-            toast.tipo === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'
-          }`}
+          role="status"
+          className="cs-toast fixed bottom-5 right-5 z-[60] flex max-w-sm items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[12px] font-semibold text-slate-800 shadow-xl"
         >
           <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-white ${toast.tipo === 'ok' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
             {toast.tipo === 'ok' ? <FiCheckCircle className="h-4 w-4" /> : <FiAlertCircle className="h-4 w-4" />}
           </span>
           <span className="flex-1">{toast.texto}</span>
-          <button onClick={() => setToast(null)} className="cursor-pointer opacity-60 hover:opacity-100" aria-label="Cerrar">
+          <button type="button" onClick={() => setToast(null)} className="cursor-pointer text-slate-400 hover:text-slate-900" aria-label="Cerrar">
             <FiX className="h-3.5 w-3.5" />
           </button>
         </div>

@@ -5,39 +5,67 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http; // <-- Importación correcta arriba del todo
+use Illuminate\Support\Facades\Cache;
 
 class EstudianteController extends Controller
 {
+    private const CACHE_TODOS = 'estudiantes_todos';
+    private const CACHE_SEGUNDOS = 30;
+    private const MAX_POR_PAGINA = 1000;
+
     /**
-     * Listar todos los estudiantes (sin paginación estricta para listados generales 
-     * o con soporte opcional si se requiere) para que React los lea fluidamente.
+     * Listar estudiantes.
+     * - ?todos=1 o ?all=true o ?per_page>=500 -> todos los registros en un arreglo plano.
+     * - ?per_page=N                         -> paginación con N por página (máx. 1000).
+     * - ?search=texto                       -> filtra por dni, nombres o apellidos.
      */
     public function index(Request $request)
     {
+        $search = trim((string) $request->input('search', ''));
+        $perPageInput = (int) $request->input('per_page', 10);
+        $todos = $request->boolean('all')
+            || $request->boolean('todos')
+            || $perPageInput >= 500;
+
+        // Listado completo sin búsqueda: se cachea como arreglo simple para evitar __PHP_Incomplete_Class_Name
+        if ($todos && $search === '') {
+            $estudiantes = Cache::remember(
+                self::CACHE_TODOS,
+                self::CACHE_SEGUNDOS,
+                fn () => Estudiante::query()
+                    ->orderBy('id_estudiante', 'desc')
+                    ->get()
+                    ->toArray()
+            );
+
+            return response()->json([
+                'success' => true,
+                'data'    => $estudiantes,
+            ], 200);
+        }
+
         $query = Estudiante::query();
 
-        // Filtrado por búsqueda (dni, nombres o apellidos)
-        if ($request->has('search') && !empty($request->search)) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
                 $q->where('dni', 'ILIKE', "%{$search}%")
                   ->orWhere('nombres', 'ILIKE', "%{$search}%")
                   ->orWhere('apellidos', 'ILIKE', "%{$search}%");
             });
         }
 
-        // Si el frontend envía ?all=true, devolvemos todos los registros juntos. 
-        // De lo contrario, mantenemos la paginación estándar de 10 en 10.
-        if ($request->has('all') && $request->all == 'true') {
-            $estudiantes = $query->orderBy('id_estudiante', 'desc')->get();
+        $query->orderBy('id_estudiante', 'desc');
+
+        if ($todos) {
+            $estudiantes = $query->get()->toArray();
         } else {
-            $estudiantes = $query->orderBy('id_estudiante', 'desc')->paginate(10);
+            $porPagina = max(1, min($perPageInput, self::MAX_POR_PAGINA));
+            $estudiantes = $query->paginate($porPagina);
         }
 
         return response()->json([
             'success' => true,
-            'data' => $estudiantes
+            'data'    => $estudiantes,
         ], 200);
     }
 
@@ -54,10 +82,15 @@ class EstudianteController extends Controller
             'telefono' => 'nullable|string|max:15',
             'programa_estudios' => 'nullable|string|max:255',
             'semestre' => 'nullable|string|max:50',
-            'estado' => 'nullable|string|max:50', 
+            'estado' => 'nullable|string|max:50',
         ]);
 
+        if (empty($validated['estado'])) {
+            $validated['estado'] = 'En progreso';
+        }
+
         $estudiante = Estudiante::create($validated);
+        Cache::forget(self::CACHE_TODOS);
 
         return response()->json([
             'success' => true,
@@ -65,7 +98,7 @@ class EstudianteController extends Controller
             'data' => $estudiante
         ], 201);
     }
-     
+
     /**
      * Mostrar el detalle de un estudiante específico
      */
@@ -112,6 +145,7 @@ class EstudianteController extends Controller
         ]);
 
         $estudiante->update($validated);
+        Cache::forget(self::CACHE_TODOS);
 
         return response()->json([
             'success' => true,
@@ -135,6 +169,7 @@ class EstudianteController extends Controller
         }
 
         $estudiante->delete();
+        Cache::forget(self::CACHE_TODOS);
 
         return response()->json([
             'success' => true,
@@ -147,7 +182,6 @@ class EstudianteController extends Controller
      */
     public function consultarDni($dni)
     {
-        // Limpiamos el DNI para asegurar que solo sean números y tenga 8 dígitos
         $dni = preg_replace('/\D/', '', trim($dni));
 
         if (strlen($dni) !== 8) {
@@ -155,7 +189,7 @@ class EstudianteController extends Controller
         }
 
         $url = 'https://api.decolecta.com/v1/reniec/dni?numero=' . $dni;
-        $token = env('SUNAT_API_TOKEN'); 
+        $token = env('SUNAT_API_TOKEN');
 
         $curl = curl_init();
         curl_setopt_array($curl, [

@@ -14,13 +14,20 @@ class DocenteController extends Controller
      */
     public function index()
     {
+        $tieneFoto = Schema::hasColumn('usuarios', 'foto_perfil');
+
+        $columnas = [
+            'u.id_usuario', 'u.nombres', 'u.apellidos', 'u.dni', 'u.correo',
+            'd.departamento', 'd.capacidad'
+        ];
+        if ($tieneFoto) {
+            $columnas[] = 'u.foto_perfil';
+        }
+
         $docentes = DB::table('usuarios as u')
             ->leftJoin('docentes as d', 'd.id_usuario', '=', 'u.id_usuario')
             ->where('u.id_rol', 2)
-            ->select(
-                'u.id_usuario', 'u.nombres', 'u.apellidos', 'u.dni', 'u.correo',
-                'd.departamento', 'd.capacidad'
-            )
+            ->select($columnas)
             ->orderBy('u.nombres')
             ->get();
 
@@ -31,7 +38,7 @@ class DocenteController extends Controller
 
         $modulosPorDocente = $this->modulosPorDocente();
 
-        return response()->json($docentes->map(function ($d) use ($alumnosPorDocente, $modulosPorDocente) {
+        return response()->json($docentes->map(function ($d) use ($alumnosPorDocente, $modulosPorDocente, $tieneFoto) {
             $alumnos   = (int) ($alumnosPorDocente[$d->id_usuario] ?? 0);
             $capacidad = (int) ($d->capacidad ?? 12);
             $modulos   = $modulosPorDocente[$d->id_usuario] ?? [];
@@ -41,6 +48,7 @@ class DocenteController extends Controller
                 'nombres'      => $d->nombres,
                 'apellidos'    => $d->apellidos,
                 'correo'       => $d->correo,
+                'foto_perfil'  => $tieneFoto ? ($d->foto_perfil ?? null) : null,
                 'departamento' => $d->departamento,
                 'alumnos'      => $alumnos,
                 'capacidad'    => $capacidad,
@@ -57,14 +65,21 @@ class DocenteController extends Controller
      */
     public function show($id)
     {
+        $tieneFoto = Schema::hasColumn('usuarios', 'foto_perfil');
+
+        $columnas = [
+            'u.id_usuario', 'u.nombres', 'u.apellidos', 'u.dni', 'u.correo',
+            'd.codigo', 'd.departamento', 'd.grado', 'd.especialidad',
+            'd.condicion', 'd.telefono', 'd.capacidad', 'd.sede', 'd.biografia'
+        ];
+        if ($tieneFoto) {
+            $columnas[] = 'u.foto_perfil';
+        }
+
         $docente = DB::table('usuarios as u')
             ->leftJoin('docentes as d', 'd.id_usuario', '=', 'u.id_usuario')
             ->where('u.id_usuario', $id)
-            ->select(
-                'u.id_usuario', 'u.nombres', 'u.apellidos', 'u.dni', 'u.correo',
-                'd.codigo', 'd.departamento', 'd.grado', 'd.especialidad',
-                'd.condicion', 'd.telefono', 'd.capacidad', 'd.sede', 'd.biografia'
-            )
+            ->select($columnas)
             ->first();
 
         if (!$docente) {
@@ -105,6 +120,7 @@ class DocenteController extends Controller
         return response()->json([
             'docente' => [
                 'nombre'       => trim(($docente->nombres ?? '') . ' ' . ($docente->apellidos ?? '')),
+                'foto_perfil'  => $tieneFoto ? ($docente->foto_perfil ?? null) : null,
                 'cargo'        => 'Docente Asesor EFSRT',
                 'departamento' => $docente->departamento,
                 'grado'        => $docente->grado,

@@ -1,773 +1,2275 @@
 import { useState, useEffect, useMemo } from "react";
+import {
+  UserRound,
+  FolderOpen,
+  CalendarDays,
+  Clock3,
+  Building2,
+  FileText,
+  History,
+  BookOpen,
+  ClipboardList,
+  MessageSquareText,
+  ChevronRight,
+  GraduationCap,
+  MapPin,
+  BriefcaseBusiness,
+  Eye,
+  RefreshCw,
+  CircleUserRound,
+  CalendarClock,
+  Layers3,
+  FileCheck2,
+  Info,
+  Award,
+  CheckCircle2,
+} from "lucide-react";
+
 import CabeceraExpediente from "./componentes/CabeceraExpediente";
 import ResumenAlumno from "./componentes/ResumenAlumno";
 import DatosPersonales, { sinVacios } from "./componentes/DatosPersonales";
+import DocumentosAlumnos from "./componentes/DocumentosAlumnos";
 
-const API = "http://localhost:8000/api"; // misma URL base de la API
+const API = "http://localhost:8000/api";
 
 const cabeceras = () => {
   const token =
-    localStorage.getItem("token") || localStorage.getItem("access_token");
+    localStorage.getItem("token") ||
+    localStorage.getItem("access_token");
+
   return {
-    "Content-Type": "application/json",
     Accept: "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 };
 
-// Normaliza un registro de módulo para que cada pestaña tenga campos consistentes
+const leerJSON = (key, fallback = null) => {
+  try {
+    const raw = sessionStorage.getItem(key) ?? localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const textoValido = (val) => {
+  if (val === null || val === undefined) return "";
+  if (typeof val === "object") return "";
+  const s = String(val).trim();
+  if (!s || s.toLowerCase() === "null" || s.toLowerCase() === "undefined") {
+    return "";
+  }
+  return s;
+};
+
+const primerTexto = (...valores) => {
+  for (const v of valores) {
+    const limpio = textoValido(v);
+    if (limpio) return limpio;
+  }
+  return "";
+};
+
+const numeroValido = (...valores) => {
+  for (const v of valores) {
+    if (v === null || v === undefined || v === "") continue;
+    const n = Number(v);
+    if (!Number.isNaN(n) && Number.isFinite(n)) {
+      return n;
+    }
+  }
+  return 0;
+};
+
+const leerEvidenciasEstudiante = (idEstudiante) => {
+  if (!idEstudiante) return [];
+  const lista = [];
+  try {
+    const claves = [
+      ...Object.keys(sessionStorage),
+      ...Object.keys(localStorage),
+    ].filter(
+      (k) =>
+        k.startsWith("docente_evidencias_asignadas_v1") ||
+        k.startsWith("evidencias_efsrt_")
+    );
+
+    for (const k of claves) {
+      const data = leerJSON(k, null);
+      if (!data) continue;
+
+      if (Array.isArray(data)) {
+        data.forEach((ev, idx) => {
+          const estEv = ev?.id_estudiante ?? ev?.estudiante_id;
+          if (!estEv || String(estEv) === String(idEstudiante)) {
+            lista.push({
+              id: ev.id_evidencia ?? ev.id ?? `${k}-${idx}`,
+              nombre: primerTexto(
+                ev.titulo,
+                ev.nombre,
+                ev.tipo_evidencia,
+                ev.tipo,
+                `Evidencia ${idx + 1}`
+              ),
+              descripcion: primerTexto(ev.descripcion, ev.observacion),
+              fecha: primerTexto(ev.fechaCreacion, ev.fecha, ev.created_at).slice(
+                0,
+                10
+              ),
+              archivo: primerTexto(ev.archivo, ev.url, ev.nombre_archivo),
+              archivo_url: primerTexto(ev.archivo, ev.url),
+              nota: ev.nota ?? ev.calificacion ?? null,
+              estado_revision: primerTexto(
+                ev.estado_revision,
+                ev.estado,
+                ev.revisado ? "Revisado" : ""
+              ),
+              id_modulo: ev.id_modulo ?? ev.modulo_id ?? null,
+              numero_modulo: ev.numero_modulo ?? ev.modulo_numero ?? null,
+            });
+          }
+        });
+        continue;
+      }
+
+      if (typeof data === "object") {
+        for (const [idClave, evs] of Object.entries(data)) {
+          if (!Array.isArray(evs)) continue;
+          const partesClave = String(idClave).split("-");
+          const claveCoincide =
+            String(idClave) === String(idEstudiante) ||
+            String(idClave).startsWith(`${idEstudiante}-`);
+
+          if (claveCoincide) {
+            const modInferido =
+              partesClave.length > 1 ? Number(partesClave[1]) : null;
+
+            evs.forEach((ev, idx) => {
+              if (ev?.seleccionada === false) return;
+              lista.push({
+                id: ev.id ?? `ev-${idx}`,
+                nombre: primerTexto(
+                  ev.titulo,
+                  ev.nombre,
+                  `Evidencia ${idx + 1}`
+                ),
+                descripcion: primerTexto(ev.descripcion, ev.observacion),
+                fecha: primerTexto(ev.fechaCreacion, ev.fecha).slice(0, 10),
+                archivo: primerTexto(ev.archivo, ev.url, ev.nombre_archivo),
+                archivo_url: primerTexto(ev.archivo, ev.url),
+                nota: ev.nota ?? ev.calificacion ?? null,
+                estado_revision: primerTexto(
+                  ev.estado_revision,
+                  ev.estado,
+                  ev.revisado ? "Revisado" : ""
+                ),
+                id_modulo: ev.id_modulo ?? ev.modulo_id ?? null,
+                numero_modulo:
+                  ev.numero_modulo ??
+                  ev.modulo_numero ??
+                  (Number.isFinite(modInferido) && modInferido > 0
+                    ? modInferido
+                    : null),
+              });
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignorar */
+  }
+  return lista;
+};
+
+const leerRevisionPorModulo = (idEstudiante, numModulo, idModulo) => {
+  if (!idEstudiante) return null;
+
+  const clavesEspecificas = [
+    `expediente_calificacion_${idEstudiante}_m${numModulo}`,
+    `expediente_calificacion_${idEstudiante}_${numModulo}`,
+    idModulo ? `expediente_calificacion_${idEstudiante}_${idModulo}` : null,
+    `revision_efsrt_${idEstudiante}_m${numModulo}`,
+    `revision_efsrt_${idEstudiante}_${numModulo}`,
+    idModulo ? `revision_efsrt_${idEstudiante}_${idModulo}` : null,
+  ].filter(Boolean);
+
+  for (const clave of clavesEspecificas) {
+    const dato = leerJSON(clave, null);
+    if (dato && typeof dato === "object") {
+      return { dato, esGenerica: false };
+    }
+  }
+
+  const clavesGenericas = [
+    `expediente_calificacion_${idEstudiante}`,
+    `revision_efsrt_${idEstudiante}`,
+  ];
+
+  for (const clave of clavesGenericas) {
+    const dato = leerJSON(clave, null);
+    if (dato && typeof dato === "object") {
+      const modDato = Number(
+        dato.numero_modulo ?? dato.modulo_numero ?? dato.id_modulo ?? dato.modulo_id
+      );
+      if (modDato && (modDato === Number(numModulo) || String(modDato) === String(idModulo))) {
+        return { dato, esGenerica: false };
+      }
+      if (!modDato) {
+        return { dato, esGenerica: true };
+      }
+    }
+  }
+
+  return null;
+};
+
+const leerAsignacionLocalModulo = (idEstudiante, idModulo, numModulo) => {
+  if (!idEstudiante) return null;
+  const claves = [
+    `expediente_efsrt_${idEstudiante}_${idModulo}`,
+    `expediente_efsrt_${idEstudiante}_${numModulo}`,
+    `expediente_efsrt_${idEstudiante}_m${numModulo}`,
+    `asignacion_efsrt_${idEstudiante}_${idModulo}`,
+    `asignacion_efsrt_${idEstudiante}_${numModulo}`,
+    `asignacion_efsrt_${idEstudiante}_m${numModulo}`,
+  ];
+  for (const clave of claves) {
+    const dato = leerJSON(clave, null);
+    if (dato && typeof dato === "object") {
+      return dato;
+    }
+  }
+  return null;
+};
+
+const listaDe = (data) => {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.data?.data)) return data.data.data;
+  return [];
+};
+
+const leerLista = async (res) => {
+  try {
+    if (res && res.ok) return listaDe(await res.json());
+  } catch {
+    /* ignorar */
+  }
+  return [];
+};
+
+const esVerdadero = (v) =>
+  v === true || v === 1 || v === "1" || v === "t" || v === "true";
+
+const ROMANOS = ["I", "II", "III"];
+
+const MODULOS_CATALOGO = [
+  {
+    id_modulo: 1,
+    numero_modulo: 1,
+    nombre_modulo: "Módulo I",
+    horas_requeridas: 160,
+  },
+  {
+    id_modulo: 2,
+    numero_modulo: 2,
+    nombre_modulo: "Módulo II",
+    horas_requeridas: 160,
+  },
+  {
+    id_modulo: 3,
+    numero_modulo: 3,
+    nombre_modulo: "Módulo III",
+    horas_requeridas: 160,
+  },
+];
+
+const detectarNumeroModulo = (mod, indice = 0) => {
+  const directo = Number(mod?.numero_modulo ?? mod?.numero);
+  if ([1, 2, 3].includes(directo)) return directo;
+
+  const texto = String(
+    mod?.nombre_modulo || mod?.modulo_nombre || mod?.modulo || ""
+  ).toLowerCase();
+  if (/\b(3|iii|3°)\b/i.test(texto)) return 3;
+  if (/\b(2|ii|2°)\b/i.test(texto)) return 2;
+  if (/\b(1|i|1°)\b/i.test(texto)) return 1;
+
+  const idNum = Number(mod?.id_modulo ?? mod?.modulo_id);
+  if ([1, 2, 3].includes(idNum)) return idNum;
+
+  return Math.min(3, Math.max(1, indice + 1));
+};
+
 const normalizarModulo = (mod, indice = 0) => {
-  const idModulo = mod.id_modulo ?? mod.modulo_id ?? mod.id ?? indice + 1;
+  const numeroModulo = detectarNumeroModulo(mod, indice);
+  const idModulo = mod?.id_modulo ?? mod?.modulo_id ?? mod?.id ?? numeroModulo;
+
+  const empObj =
+    typeof mod?.empresa === "object" && mod.empresa ? mod.empresa : null;
+  const docObj =
+    typeof mod?.docente === "object" && mod.docente
+      ? mod.docente
+      : typeof mod?.asesor === "object" && mod.asesor
+        ? mod.asesor
+        : null;
+  const supObj =
+    typeof mod?.supervisor === "object" && mod.supervisor
+      ? mod.supervisor
+      : typeof mod?.responsable_empresa === "object" &&
+          mod.responsable_empresa
+        ? mod.responsable_empresa
+        : null;
+  const revObj =
+    typeof mod?.revision === "object" && mod.revision ? mod.revision : null;
+
+  const notaExtraida =
+    mod?.nota ??
+    mod?.calificacion ??
+    mod?.nota_final ??
+    mod?.promedio ??
+    revObj?.nota ??
+    revObj?.calificacion ??
+    null;
+
+  const estadoRevisionExtraido = primerTexto(
+    mod?.estado_revision,
+    revObj?.estado,
+    revObj?.estado_revision
+  );
+
+  const comentarioRevisionExtraido = primerTexto(
+    mod?.comentario_revision,
+    mod?.observacion_revision,
+    revObj?.observaciones,
+    revObj?.comentario
+  );
+
   return {
-    id_expediente: mod.id_expediente ?? mod.id ?? `exp-${idModulo}-${indice}`,
+    id_expediente:
+      mod?.id_expediente ??
+      mod?.id ??
+      `exp-${idModulo}-${numeroModulo}`,
+
     id_modulo: idModulo,
-    nombre_modulo:
-      mod.nombre_modulo ||
-      mod.modulo_nombre ||
-      mod.modulo ||
-      `Módulo EFSRT ${indice + 1}`,
-    periodo_academico: mod.periodo_academico || mod.periodo || "2026-II",
-    estado_modulo: mod.estado_modulo || mod.estado || "En proceso",
-    empresa_entidad:
-      mod.empresa_entidad || mod.entidad_nombre || mod.entidad || "",
-    fecha_inicio: mod.fecha_inicio || "",
-    fecha_fin: mod.fecha_fin || "",
-    horas_requeridas: Number(mod.horas_requeridas ?? 160),
-    horas_acumuladas: Number(mod.horas_acumuladas ?? mod.hrs ?? 0),
-    nota: mod.nota ?? "",
-    observaciones: mod.observaciones || "",
-    evidencias: Array.isArray(mod.evidencias)
-      ? mod.evidencias
-      : [
-          { id: 1, nombre: "Plan de Prácticas / Carta de Aceptación", estado: "Pendiente", archivo: "" },
-          { id: 2, nombre: "Ficha de Seguimiento y Horas EFSRT", estado: "Pendiente", archivo: "" },
-          { id: 3, nombre: "Informe Final / Evaluación del Módulo", estado: "Pendiente", archivo: "" },
-        ],
+    numero_modulo: numeroModulo,
+
+    nombre_modulo: primerTexto(
+      mod?.nombre_modulo,
+      mod?.modulo_nombre,
+      mod?.modulo,
+      `Módulo ${ROMANOS[numeroModulo - 1] || numeroModulo}`
+    ),
+
+    periodo_academico: primerTexto(
+      mod?.periodo_academico,
+      mod?.periodo,
+      mod?.semestre,
+      mod?.anio
+    ),
+
+    estado_efsrt: primerTexto(mod?.estado_efsrt),
+    portafolio: esVerdadero(
+      mod?.portafolio_fisico_revisado ?? mod?.portafolio_conforme ?? mod?.portafolio
+    ),
+    fecha_validacion: primerTexto(mod?.fecha_validacion),
+    id_empresa: mod?.id_empresa ?? empObj?.id_empresa ?? null,
+    id_docente_asesor: mod?.id_docente_asesor ?? null,
+    updated_at: primerTexto(mod?.updated_at),
+
+    estado_modulo: primerTexto(
+      mod?.estado_efsrt,
+      mod?.estado_modulo,
+      mod?.estado,
+      "No efectuó"
+    ),
+
+    empresa_entidad: primerTexto(
+      mod?.empresa_entidad,
+      mod?.empresa_institucion,
+      mod?.empresa_nombre,
+      mod?.razon_social,
+      mod?.nombre_comercial,
+      mod?.entidad_nombre,
+      mod?.entidad,
+      empObj?.razon_social,
+      empObj?.nombre_comercial,
+      empObj?.nombre
+    ),
+
+    fecha_inicio: primerTexto(
+      mod?.fecha_inicio,
+      mod?.fecha_inicio_practicas,
+      mod?.fecha_inicio_efsrt,
+      mod?.inicio
+    ),
+
+    fecha_fin: primerTexto(
+      mod?.fecha_fin,
+      mod?.fecha_fin_practicas,
+      mod?.fecha_fin_efsrt,
+      mod?.fecha_termino,
+      mod?.fin
+    ),
+
+    horas_requeridas: Number(
+      mod?.horas_requeridas && Number(mod.horas_requeridas) > 0
+        ? mod.horas_requeridas
+        : 160
+    ),
+
+    horas_acumuladas: numeroValido(
+      mod?.horas_acumuladas,
+      mod?.horas_realizadas,
+      mod?.horas_completadas,
+      mod?.hrs,
+      mod?.horas,
+      revObj?.horas_acumuladas,
+      revObj?.horas_realizadas,
+      revObj?.hrs,
+      revObj?.horas,
+      0
+    ),
+
+    nota:
+      notaExtraida !== null && notaExtraida !== undefined && notaExtraida !== ""
+        ? notaExtraida
+        : null,
+
+    estado_revision: estadoRevisionExtraido,
+    comentario_revision: comentarioRevisionExtraido,
+
+    descripcion: primerTexto(
+      mod?.descripcion,
+      mod?.descripcion_modulo,
+      mod?.detalle_modulo,
+      mod?.resumen
+    ),
+
+    actividades: Array.isArray(mod?.actividades) ? mod.actividades : [],
+    historial: Array.isArray(mod?.historial) ? mod.historial : [],
+    seguimientos: Array.isArray(mod?.seguimientos) ? mod.seguimientos : [],
+    evidencias: Array.isArray(mod?.evidencias) ? mod.evidencias : [],
+
+    observaciones: primerTexto(
+      mod?.observaciones,
+      mod?.observacion,
+      comentarioRevisionExtraido
+    ),
+
+    docente: primerTexto(
+      mod?.docente_responsable,
+      mod?.docente_nombre,
+      mod?.nombre_docente,
+      mod?.asesor_nombre,
+      mod?.docente_asesor_nombre,
+      [mod?.docente_nombres, mod?.docente_apellidos].filter(Boolean).join(" "),
+      mod?.asesor,
+      typeof mod?.docente === "string" ? mod.docente : "",
+      docObj
+        ? `${docObj.nombres || docObj.nombre || ""} ${docObj.apellidos || ""}`.trim()
+        : ""
+    ),
+
+    responsable: primerTexto(
+      mod?.responsable,
+      mod?.supervisor,
+      mod?.supervisor_nombre,
+      mod?.jefe_inmediato,
+      mod?.encargado_empresa,
+      typeof mod?.supervisor === "string" ? mod.supervisor : "",
+      supObj
+        ? `${supObj.nombres || supObj.nombre || ""} ${supObj.apellidos || ""}`.trim()
+        : ""
+    ),
+
+    lugar: primerTexto(
+      mod?.lugar,
+      mod?.ubicacion,
+      mod?.empresa_direccion,
+      mod?.direccion_entidad,
+      mod?.direccion_empresa,
+      mod?.direccion,
+      empObj?.direccion,
+      empObj?.ubicacion,
+      empObj?.distrito
+    ),
+
+    created_at: primerTexto(mod?.created_at),
   };
 };
 
-/* ───────────── Estilos y animaciones propias ───────────── */
-const ESTILOS = `
-@keyframes exp-fade-up { from { opacity:0; transform:translateY(14px);} to { opacity:1; transform:translateY(0);} }
-@keyframes exp-pop { 0% { opacity:0; transform:scale(.92);} 60% { transform:scale(1.02);} 100% { opacity:1; transform:scale(1);} }
-@keyframes exp-slide-in { from { opacity:0; transform:translateX(-12px);} to { opacity:1; transform:translateX(0);} }
-@keyframes exp-toast { 0% { opacity:0; transform:translateY(-10px) scale(.97);} 100% { opacity:1; transform:translateY(0) scale(1);} }
-@keyframes exp-shine { 0% { transform:translateX(-120%);} 100% { transform:translateX(220%);} }
-@keyframes exp-pulse-ring { 0% { box-shadow:0 0 0 0 rgba(37,99,235,.45);} 100% { box-shadow:0 0 0 10px rgba(37,99,235,0);} }
-.exp-fade-up { animation: exp-fade-up .5s cubic-bezier(.22,1,.36,1) both; }
-.exp-pop { animation: exp-pop .45s cubic-bezier(.22,1,.36,1) both; }
-.exp-slide-in { animation: exp-slide-in .4s ease-out both; }
-.exp-toast { animation: exp-toast .35s ease-out both; }
-.exp-shine::after { content:""; position:absolute; inset:0; width:40%; background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent); animation: exp-shine 2.4s ease-in-out infinite; }
-.exp-pulse { animation: exp-pulse-ring 1.8s ease-out infinite; }
-.exp-card { transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease; }
-.exp-card:hover { transform: translateY(-3px); }
-@media (prefers-reduced-motion: reduce) { .exp-fade-up,.exp-pop,.exp-slide-in,.exp-toast,.exp-pulse,.exp-shine::after { animation:none !important; } .exp-card:hover { transform:none; } }
-`;
+const completarModulos = (lista, catalogoModulos = []) => {
+  const baseCatalogo =
+    Array.isArray(catalogoModulos) && catalogoModulos.length > 0
+      ? catalogoModulos
+      : MODULOS_CATALOGO;
 
-/* ───────────── Iconos (SVG en línea, sin dependencias) ───────────── */
-const Icono = ({ d, className = "h-4 w-4" }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    {[].concat(d).map((p, i) => (
-      <path key={i} d={p} />
-    ))}
-  </svg>
-);
-const I = {
-  check: "M5 13l4 4L19 7",
-  clock: ["M12 6v6l4 2", "M12 21a9 9 0 100-18 9 9 0 000 18z"],
-  alert: ["M12 9v4", "M12 17h.01", "M10.3 3.9L2.4 18a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"],
-  building: ["M3 21h18", "M5 21V7l7-4 7 4v14", "M9 21v-6h6v6"],
-  star: "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z",
-  file: ["M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z", "M14 3v5h5"],
-  doc: ["M7 3h8l4 4v14H7z", "M15 3v4h4", "M10 12h6", "M10 16h6"],
-  award: ["M12 15a6 6 0 100-12 6 6 0 000 12z", "M8.5 14l-1.5 7 5-3 5 3-1.5-7"],
-  lock: ["M6 11h12v9H6z", "M8 11V8a4 4 0 018 0v3"],
-  save: ["M5 4h11l3 3v13H5z", "M8 4v5h7V4", "M8 20v-6h8v6"],
-  pen: ["M4 20h4L19 9l-4-4L4 16z"],
-  close: "M6 6l12 12M18 6L6 18",
-  layers: ["M12 3l9 5-9 5-9-5z", "M3 13l9 5 9-5"],
+  const porNumero = new Map();
+  lista.forEach((m, idx) => {
+    const num = detectarNumeroModulo(m, idx);
+    const existente = porNumero.get(num);
+    porNumero.set(num, existente ? { ...existente, ...m } : m);
+  });
+
+  const resultado = [];
+  for (let num = 1; num <= 3; num += 1) {
+    const modCatalogo = baseCatalogo.find(
+      (cm) => Number(cm.numero_modulo ?? cm.numero ?? cm.id_modulo) === num
+    );
+    const modActual = porNumero.get(num);
+
+    if (modActual) {
+      resultado.push(
+        normalizarModulo(
+          {
+            ...modCatalogo,
+            ...modActual,
+            numero_modulo: num,
+            id_modulo: modActual.id_modulo ?? modCatalogo?.id_modulo ?? num,
+            nombre_modulo: primerTexto(
+              modActual.nombre_modulo,
+              modCatalogo?.nombre_modulo,
+              `Módulo ${ROMANOS[num - 1]}`
+            ),
+            horas_requeridas:
+              modActual.horas_requeridas && Number(modActual.horas_requeridas) > 0
+                ? modActual.horas_requeridas
+                : modCatalogo?.horas_requeridas || 160,
+          },
+          num - 1
+        )
+      );
+    } else {
+      resultado.push(
+        normalizarModulo(
+          {
+            id_modulo: modCatalogo?.id_modulo ?? num,
+            numero_modulo: num,
+            nombre_modulo: primerTexto(
+              modCatalogo?.nombre_modulo,
+              `Módulo ${ROMANOS[num - 1]}`
+            ),
+            horas_requeridas: modCatalogo?.horas_requeridas || 160,
+          },
+          num - 1
+        )
+      );
+    }
+  }
+
+  return resultado;
 };
 
-/* ───────────── Componentes de apoyo ───────────── */
-const AnilloProgreso = ({ valor, tam = 56, grosor = 6, children }) => {
-  const r = (tam - grosor) / 2;
-  const c = 2 * Math.PI * r;
-  const pct = Math.max(0, Math.min(100, valor));
+const fechaFormato = (fecha) => {
+  const limpia = textoValido(fecha);
+  if (!limpia) return "No registrado";
+
+  const date = new Date(`${limpia}`.slice(0, 10) + "T12:00:00");
+
+  if (Number.isNaN(date.getTime())) {
+    return limpia;
+  }
+
+  return date.toLocaleDateString("es-PE", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+};
+
+const obtenerNombre = (item) =>
+  primerTexto(
+    item.nombre,
+    item.titulo,
+    item.actividad,
+    item.descripcion,
+    item.nombre_documento,
+    "Registro sin título"
+  );
+
+const obtenerFecha = (item) =>
+  primerTexto(
+    item.fecha,
+    item.fecha_registro,
+    item.created_at,
+    item.fecha_inicio
+  );
+
+const ESTILOS = `
+@keyframes expedienteEntrada {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.exp-entrada {
+  animation: expedienteEntrada .4s ease both;
+}
+
+.exp-tarjeta {
+  transition: border-color .2s ease,
+              box-shadow .2s ease,
+              transform .2s ease;
+}
+
+.exp-tarjeta:hover {
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exp-entrada,
+  .exp-tarjeta {
+    animation: none;
+    transition: none;
+  }
+}
+`;
+
+const IconoSeccion = ({ icon: Icon, color = "blue" }) => {
+  const colores = {
+    blue: "bg-blue-50 text-blue-600",
+    emerald: "bg-emerald-50 text-emerald-600",
+    violet: "bg-violet-50 text-violet-600",
+    amber: "bg-amber-50 text-amber-600",
+    slate: "bg-slate-100 text-slate-600",
+  };
+
   return (
-    <div className="relative shrink-0" style={{ width: tam, height: tam }}>
-      <svg width={tam} height={tam} className="-rotate-90">
-        <circle cx={tam / 2} cy={tam / 2} r={r} fill="none" stroke="currentColor" strokeOpacity=".15" strokeWidth={grosor} />
-        <circle
-          cx={tam / 2} cy={tam / 2} r={r} fill="none" stroke="currentColor"
-          strokeWidth={grosor} strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={c - (c * pct) / 100}
-          style={{ transition: "stroke-dashoffset .9s cubic-bezier(.22,1,.36,1)" }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center text-[11px] font-bold">{children}</div>
+    <div
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+        colores[color]
+      }`}
+    >
+      <Icon size={19} />
     </div>
   );
 };
 
-const ESTADOS_EVIDENCIA = {
-  Pendiente: { icono: I.clock, activo: "bg-slate-500 text-white", suave: "bg-slate-100 text-slate-600", borde: "border-slate-300" },
-  Observado: { icono: I.alert, activo: "bg-amber-500 text-white", suave: "bg-amber-50 text-amber-700", borde: "border-amber-300" },
-  Aprobado: { icono: I.check, activo: "bg-emerald-600 text-white", suave: "bg-emerald-50 text-emerald-700", borde: "border-emerald-300" },
-};
+const Seccion = ({ titulo, descripcion, icon: Icon, children }) => (
+  <section className="space-y-4">
+    <div className="flex items-center gap-3">
+      <IconoSeccion icon={Icon} />
+      <div>
+        <h3 className="text-sm font-bold text-slate-800">
+          {titulo}
+        </h3>
+        {descripcion && (
+          <p className="text-xs text-slate-500">
+            {descripcion}
+          </p>
+        )}
+      </div>
+    </div>
 
-const Requisito = ({ cumplido, texto, darkMode }) => (
-  <li className="flex items-center gap-2 text-xs">
-    <span
-      className={`flex h-4 w-4 items-center justify-center rounded-full transition-colors duration-300 ${
-        cumplido ? "bg-emerald-500 text-white" : darkMode ? "bg-slate-700 text-slate-400" : "bg-slate-200 text-slate-400"
-      }`}
-    >
-      <Icono d={cumplido ? I.check : I.close} className="h-2.5 w-2.5" />
-    </span>
-    <span className={cumplido ? "font-medium" : "opacity-60"}>{texto}</span>
-  </li>
+    {children}
+  </section>
 );
 
-export default function ExpedienteAlumno({ estudiante, onVolver, darkMode = false }) {
-  const idEstudiante = estudiante?.id_estudiante ?? estudiante?.id;
+const CampoInformacion = ({ etiqueta, valor, icon: Icon }) => (
+  <div className="min-w-0 space-y-1">
+    <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+      {Icon && <Icon size={13} />}
+      {etiqueta}
+    </p>
+
+    <p className="break-words text-sm font-semibold text-slate-700">
+      {textoValido(valor) || "No registrado"}
+    </p>
+  </div>
+);
+
+const Estado = ({ valor }) => {
+  const texto = textoValido(valor) || "Sin información";
+  const estado = texto.toLowerCase();
+
+  let estilo = "bg-slate-100 text-slate-600";
+
+  if (
+    estado.includes("activo") ||
+    estado.includes("proceso")
+  ) {
+    estilo = "bg-blue-50 text-blue-700";
+  }
+
+  if (
+    estado.includes("finalizado") ||
+    estado.includes("completado") ||
+    estado.includes("revisado") ||
+    estado.includes("aprobado") ||
+    estado.includes("conforme") ||
+    estado.includes("validado") ||
+    estado.includes("apto") ||
+    estado.includes("listo") ||
+    estado.includes("emitid")
+  ) {
+    estilo = "bg-emerald-50 text-emerald-700";
+  }
+
+  if (
+    estado.includes("observado") ||
+    estado.includes("verificar") ||
+    estado.includes("pendiente") ||
+    estado.includes("incomplet")
+  ) {
+    estilo = "bg-amber-50 text-amber-700";
+  }
+
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${estilo}`}>
+      <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current" />
+      {texto}
+    </span>
+  );
+};
+
+export default function ExpedienteAlumno({
+  estudiante,
+  onVolver,
+  darkMode = false,
+}) {
+  const estudianteRespaldo = useMemo(() => {
+    if (estudiante && typeof estudiante === "object") return estudiante;
+    return leerJSON("expediente_alumno_actual", null);
+  }, [estudiante]);
+
+  const idEstudiante =
+    estudianteRespaldo?.id_estudiante ?? estudianteRespaldo?.id;
 
   const [detalle, setDetalle] = useState(null);
   const [modulos, setModulos] = useState([]);
   const [moduloActivoId, setModuloActivoId] = useState(null);
+  const [seccionActiva, setSeccionActiva] = useState("resumen");
   const [cargando, setCargando] = useState(true);
-  const [guardandoModulo, setGuardandoModulo] = useState(false);
   const [aviso, setAviso] = useState("");
-  const [mensajeExito, setMensajeExito] = useState("");
-  const [documentoPrevio, setDocumentoPrevio] = useState(null);
-
-  const usuario = JSON.parse(localStorage.getItem("user") || "{}");
-  const rol = Number(usuario.id_rol);
-  const esAdmin = rol === 1;
-  const esDocente = rol === 2;
-  const puedeGestionarModulo = esAdmin || esDocente;
+  const [busqueda, setBusqueda] = useState("");
+  const [syncTick, setSyncTick] = useState(0);
 
   const cargar = async () => {
+    if (!idEstudiante) return;
+
     setCargando(true);
     setAviso("");
-    setMensajeExito("");
 
     try {
-      const res = await fetch(`${API}/estudiantes/${idEstudiante}`, { headers: cabeceras() });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || `Error ${res.status}`);
-      const datosAlumno = data.data ?? data.estudiante ?? data;
-      setDetalle(datosAlumno);
+      const [
+        resAlumno,
+        resModulos,
+        resEv,
+        resCatalogoMod,
+        resEmpresas,
+        resDocentes,
+      ] = await Promise.all([
+        fetch(`${API}/estudiantes/${idEstudiante}`, {
+          headers: cabeceras(),
+        }).catch(() => null),
 
-      let listaModulos = [];
-      try {
-        const resExp = await fetch(`${API}/estudiantes/${idEstudiante}/expediente-modulos`, { headers: cabeceras() });
-        if (resExp.ok) {
-          const dataExp = await resExp.json().catch(() => ({}));
-          const rawModulos = Array.isArray(dataExp) ? dataExp : Array.isArray(dataExp.data) ? dataExp.data : [];
-          listaModulos = rawModulos.map((m, idx) => normalizarModulo(m, idx));
+        fetch(
+          `${API}/estudiantes/${idEstudiante}/expediente-modulos`,
+          { headers: cabeceras() }
+        ).catch(() => null),
+
+        fetch(
+          `${API}/evidencias-efsrt?id_estudiante=${idEstudiante}`,
+          { headers: cabeceras() }
+        ).catch(() => null),
+
+        fetch(`${API}/modulos-profesionales`, {
+          headers: cabeceras(),
+        }).catch(() => null),
+
+        fetch(`${API}/empresas?per_page=500&todos=1`, {
+          headers: cabeceras(),
+        }).catch(() => null),
+
+        fetch(`${API}/docentes?per_page=500&todos=1`, {
+          headers: cabeceras(),
+        }).catch(() => null),
+      ]);
+
+      let alumnoBackend = null;
+      if (resAlumno && resAlumno.ok) {
+        const dataAlumno = await resAlumno.json();
+        alumnoBackend =
+          dataAlumno.data ??
+          dataAlumno.estudiante ??
+          dataAlumno;
+        setDetalle(alumnoBackend);
+      }
+
+      let catalogoBD = MODULOS_CATALOGO;
+      if (resCatalogoMod && resCatalogoMod.ok) {
+        const dataCat = await resCatalogoMod.json();
+        const rawCat = Array.isArray(dataCat)
+          ? dataCat
+          : Array.isArray(dataCat?.data)
+            ? dataCat.data
+            : [];
+        if (rawCat.length > 0) {
+          catalogoBD = rawCat;
         }
-      } catch {
-        // Endpoint aún no disponible: no rompemos la vista
       }
 
-      if (listaModulos.length === 0) {
-        const moduloBase = normalizarModulo(
-          {
-            id_modulo: estudiante?.id_modulo ?? 1,
-            nombre_modulo: estudiante?.modulo_nombre || estudiante?.modulo || "Módulo EFSRT",
-            periodo_academico: estudiante?.periodo_academico || "2026-II",
-            entidad_nombre: estudiante?.entidad || "",
-            horas_acumuladas: estudiante?.horas_acumuladas ?? estudiante?.hrs ?? 0,
-            estado: estudiante?.estado || "En proceso",
-          },
-          0
-        );
-        listaModulos = [moduloBase];
-      }
-
-      setModulos(listaModulos);
-      setModuloActivoId((prev) =>
-        listaModulos.some((m) => String(m.id_expediente) === String(prev)) ? prev : listaModulos[0].id_expediente
+      const [empresasBD, docentesBD] = await Promise.all([
+        leerLista(resEmpresas),
+        leerLista(resDocentes),
+      ]);
+      const empresaPorId = new Map(
+        empresasBD.map((e) => [String(e.id_empresa ?? e.id), e])
       );
-    } catch (e) {
-      setAviso(`No se pudo actualizar la información desde el servidor (${e.message}).`);
-      if (modulos.length === 0 && estudiante) {
-        const fallbackMod = normalizarModulo(
-          {
-            id_modulo: estudiante?.id_modulo ?? 1,
-            nombre_modulo: estudiante?.modulo_nombre || estudiante?.modulo || "Módulo EFSRT",
-            periodo_academico: estudiante?.periodo_academico || "2026-II",
-          },
-          0
-        );
-        setModulos([fallbackMod]);
-        setModuloActivoId(fallbackMod.id_expediente);
-      }
-    }
+      const docentePorUsuario = new Map();
+      const docentePorOtro = new Map();
+      docentesBD.forEach((d) => {
+        if (d.id_usuario != null) docentePorUsuario.set(String(d.id_usuario), d);
+        [d.id_docente, d.id].forEach((v) => {
+          if (v != null && !docentePorOtro.has(String(v)))
+            docentePorOtro.set(String(v), d);
+        });
+      });
 
-    setCargando(false);
+      let evidenciasAPI = [];
+      if (resEv && resEv.ok) {
+        const dataEv = await resEv.json();
+        const rawEv = Array.isArray(dataEv)
+          ? dataEv
+          : Array.isArray(dataEv?.data)
+            ? dataEv.data
+            : [];
+        evidenciasAPI = rawEv.map((ev, i) => ({
+          id: ev.id_evidencia ?? ev.id ?? `ev-api-${i}`,
+          nombre: primerTexto(
+            ev.titulo,
+            ev.tipo_evidencia,
+            ev.tipo,
+            `Evidencia ${i + 1}`
+          ),
+          descripcion: primerTexto(ev.descripcion, ev.comentario),
+          fecha: primerTexto(ev.fecha_creacion, ev.created_at, ev.fecha).slice(
+            0,
+            10
+          ),
+          archivo: primerTexto(ev.archivo, ev.url, ev.nombre_archivo),
+          archivo_url: primerTexto(ev.archivo, ev.url),
+          nota: ev.nota ?? ev.calificacion ?? null,
+          estado_revision: primerTexto(
+            ev.estado_revision,
+            ev.estado,
+            ev.revisado ? "Revisado" : ""
+          ),
+          id_modulo: ev.id_modulo ?? ev.modulo_id ?? null,
+          numero_modulo: ev.numero_modulo ?? ev.modulo_numero ?? null,
+        }));
+      }
+
+      const evidenciasLocales = leerEvidenciasEstudiante(idEstudiante);
+      const todasEvidencias =
+        evidenciasAPI.length > 0 ? evidenciasAPI : evidenciasLocales;
+
+      let lista = [];
+      if (resModulos && resModulos.ok) {
+        const dataModulos = await resModulos.json();
+        const registros = Array.isArray(dataModulos)
+          ? dataModulos
+          : Array.isArray(dataModulos.data)
+            ? dataModulos.data
+            : [];
+        lista = registros.map((r, i) => normalizarModulo(r, i));
+      }
+
+      const baseAlumno = {
+        ...sinVacios(estudianteRespaldo),
+        ...sinVacios(alumnoBackend),
+      };
+
+      const expAnidado =
+        typeof baseAlumno?.expediente === "object" && baseAlumno.expediente
+          ? baseAlumno.expediente
+          : {};
+      const asigAnidada =
+        typeof baseAlumno?.asignacion === "object" && baseAlumno.asignacion
+          ? baseAlumno.asignacion
+          : {};
+      const empAnidada =
+        typeof baseAlumno?.empresa === "object" && baseAlumno.empresa
+          ? baseAlumno.empresa
+          : {};
+      const docAnidado =
+        typeof baseAlumno?.docente === "object" && baseAlumno.docente
+          ? baseAlumno.docente
+          : {};
+
+      const numeroModuloAlumno = detectarNumeroModulo(
+        {
+          numero_modulo:
+            baseAlumno?.numero_modulo ??
+            expAnidado?.numero_modulo ??
+            asigAnidada?.numero_modulo,
+          id_modulo:
+            baseAlumno?.id_modulo ??
+            expAnidado?.id_modulo ??
+            asigAnidada?.id_modulo,
+          nombre_modulo:
+            baseAlumno?.modulo_nombre ||
+            baseAlumno?.modulo ||
+            expAnidado?.nombre_modulo,
+        },
+        0
+      );
+
+      if (lista.length === 0) {
+        lista = [
+          normalizarModulo(
+            {
+              id_modulo:
+                baseAlumno?.id_modulo ??
+                expAnidado?.id_modulo ??
+                numeroModuloAlumno,
+              numero_modulo: numeroModuloAlumno,
+              nombre_modulo: primerTexto(
+                baseAlumno?.modulo_nombre,
+                baseAlumno?.modulo,
+                expAnidado?.nombre_modulo,
+                `Módulo ${ROMANOS[numeroModuloAlumno - 1] || numeroModuloAlumno}`
+              ),
+              periodo_academico: primerTexto(
+                baseAlumno?.periodo_academico,
+                expAnidado?.periodo_academico,
+                asigAnidada?.periodo_academico
+              ),
+              entidad_nombre: primerTexto(
+                baseAlumno?.empresa_nombre,
+                baseAlumno?.entidad,
+                empAnidada?.razon_social,
+                empAnidada?.nombre
+              ),
+              horas_acumuladas: numeroValido(
+                baseAlumno?.horas_acumuladas,
+                expAnidado?.horas_acumuladas,
+                asigAnidada?.horas_acumuladas,
+                baseAlumno?.hrs,
+                0
+              ),
+              estado: primerTexto(
+                baseAlumno?.estado,
+                expAnidado?.estado,
+                "No efectuó"
+              ),
+            },
+            numeroModuloAlumno - 1
+          ),
+        ];
+      }
+
+      const moduloObjetivoGenerico =
+        todasEvidencias.find((ev) => ev.numero_modulo)?.numero_modulo ||
+        lista.find((m) => m.horas_acumuladas > 0 || m.evidencias.length > 0)
+          ?.numero_modulo ||
+        numeroModuloAlumno ||
+        1;
+
+      lista = completarModulos(lista, catalogoBD).map((mod) => {
+        const numMod = mod.numero_modulo;
+        const asigLocal = leerAsignacionLocalModulo(
+          idEstudiante,
+          mod.id_modulo,
+          numMod
+        );
+        const revInfo = leerRevisionPorModulo(
+          idEstudiante,
+          numMod,
+          mod.id_modulo
+        );
+        const revGuardada =
+          revInfo &&
+          (!revInfo.esGenerica || Number(moduloObjetivoGenerico) === Number(numMod))
+            ? revInfo.dato
+            : null;
+
+        const evsDelModulo =
+          mod.evidencias.length > 0
+            ? mod.evidencias
+            : todasEvidencias.filter((ev) => {
+                if (ev.numero_modulo) {
+                  return Number(ev.numero_modulo) === Number(numMod);
+                }
+                if (ev.id_modulo) {
+                  return String(ev.id_modulo) === String(mod.id_modulo);
+                }
+                return Number(moduloObjetivoGenerico) === Number(numMod);
+              });
+
+        const horasRevision = numeroValido(
+          revGuardada?.horas_acumuladas,
+          revGuardada?.horas_realizadas,
+          revGuardada?.horas_completadas,
+          revGuardada?.hrs,
+          revGuardada?.horas,
+          null
+        );
+
+        const horasAsignacionLocal = numeroValido(
+          asigLocal?.horas_acumuladas,
+          asigLocal?.horas_realizadas,
+          asigLocal?.hrs,
+          asigLocal?.horas,
+          null
+        );
+
+        const horasAlumnoProp =
+          Number(numeroModuloAlumno) === Number(numMod)
+            ? numeroValido(
+                baseAlumno?.horas_acumuladas,
+                expAnidado?.horas_acumuladas,
+                asigAnidada?.horas_acumuladas,
+                baseAlumno?.hrs,
+                null
+              )
+            : null;
+
+        const horasFinales = Math.max(
+          numeroValido(mod.horas_acumuladas, 0),
+          horasRevision ?? 0,
+          horasAsignacionLocal ?? 0,
+          horasAlumnoProp ?? 0
+        );
+
+        const horasRequeridasFinales = Math.max(
+          1,
+          numeroValido(
+            mod.horas_requeridas,
+            asigLocal?.horas_requeridas,
+            revGuardada?.horas_requeridas,
+            expAnidado?.horas_requeridas,
+            160
+          )
+        );
+
+        const notaFinal =
+          mod.nota !== null && mod.nota !== undefined
+            ? mod.nota
+            : revGuardada?.nota ??
+              revGuardada?.calificacion ??
+              (Number(numeroModuloAlumno) === Number(numMod)
+                ? baseAlumno?.nota ?? baseAlumno?.calificacion ?? null
+                : null);
+
+        const estadoRevFinal = primerTexto(
+          mod.estado_revision,
+          revGuardada?.estado_revision,
+          revGuardada?.estado,
+          notaFinal !== null ? "Revisado" : ""
+        );
+
+        const comentarioRevFinal = primerTexto(
+          mod.comentario_revision,
+          revGuardada?.comentario,
+          revGuardada?.observacion,
+          revGuardada?.observaciones
+        );
+
+        const empBD = empresaPorId.get(
+          String(
+            mod.id_empresa ??
+              asigLocal?.id_empresa ??
+              asigAnidada?.id_empresa ??
+              ""
+          )
+        );
+        const docBD =
+          docentePorUsuario.get(
+            String(
+              mod.id_docente_asesor ??
+                asigLocal?.id_docente_asesor ??
+                asigAnidada?.id_docente_asesor ??
+                ""
+            )
+          ) ??
+          docentePorOtro.get(
+            String(
+              mod.id_docente_asesor ??
+                asigLocal?.id_docente_asesor ??
+                asigAnidada?.id_docente_asesor ??
+                ""
+            )
+          );
+
+        const empresaFinal = primerTexto(
+          mod.empresa_entidad,
+          empBD?.razon_social,
+          empBD?.nombre_comercial,
+          empBD?.nombre,
+          asigLocal?.empresa_institucion,
+          asigLocal?.empresa_nombre,
+          asigLocal?.empresa,
+          expAnidado?.empresa_entidad,
+          expAnidado?.empresa_nombre,
+          asigAnidada?.empresa_nombre,
+          asigAnidada?.empresa,
+          baseAlumno?.empresa_nombre,
+          baseAlumno?.empresa,
+          baseAlumno?.entidad,
+          empAnidada?.razon_social,
+          empAnidada?.nombre
+        );
+
+        const docenteFinal = primerTexto(
+          mod.docente,
+          docBD
+            ? `${docBD.nombres || docBD.nombre || ""} ${docBD.apellidos || ""}`.trim()
+            : "",
+          asigLocal?.docente_responsable,
+          asigLocal?.docente_nombre,
+          asigLocal?.asesor,
+          expAnidado?.docente_responsable,
+          expAnidado?.docente_nombre,
+          asigAnidada?.docente_responsable,
+          asigAnidada?.asesor,
+          baseAlumno?.docente_responsable,
+          baseAlumno?.docente_nombre,
+          baseAlumno?.asesor,
+          baseAlumno?.docente,
+          docAnidado
+            ? `${docAnidado.nombres || docAnidado.nombre || ""} ${docAnidado.apellidos || ""}`.trim()
+            : ""
+        );
+
+        const supervisorFinal = primerTexto(
+          mod.responsable,
+          asigLocal?.responsable,
+          asigLocal?.supervisor,
+          expAnidado?.responsable,
+          expAnidado?.supervisor,
+          baseAlumno?.responsable,
+          baseAlumno?.supervisor,
+          baseAlumno?.jefe_inmediato,
+          empAnidada?.representante,
+          empAnidada?.supervisor
+        );
+
+        const fechaInicioFinal = primerTexto(
+          mod.fecha_inicio,
+          asigLocal?.fecha_inicio,
+          expAnidado?.fecha_inicio,
+          asigAnidada?.fecha_inicio,
+          baseAlumno?.fecha_inicio,
+          baseAlumno?.fecha_inicio_practicas
+        );
+
+        const fechaFinFinal = primerTexto(
+          mod.fecha_fin,
+          asigLocal?.fecha_fin,
+          expAnidado?.fecha_fin,
+          asigAnidada?.fecha_fin,
+          baseAlumno?.fecha_fin,
+          baseAlumno?.fecha_fin_practicas
+        );
+
+        const periodoFinal = primerTexto(
+          mod.periodo_academico,
+          asigLocal?.periodo_academico,
+          expAnidado?.periodo_academico,
+          asigAnidada?.periodo_academico,
+          baseAlumno?.periodo_academico,
+          baseAlumno?.semestre
+        );
+
+        const ubicacionFinal = primerTexto(
+          mod.lugar,
+          empBD?.direccion,
+          empBD?.ubicacion,
+          asigLocal?.ubicacion,
+          asigLocal?.lugar,
+          expAnidado?.ubicacion,
+          expAnidado?.lugar,
+          asigAnidada?.ubicacion,
+          baseAlumno?.ubicacion,
+          baseAlumno?.lugar,
+          baseAlumno?.direccion_empresa,
+          empAnidada?.direccion,
+          empAnidada?.ubicacion
+        );
+
+        const descripcionFinal = primerTexto(
+          mod.descripcion,
+          asigLocal?.descripcion,
+          expAnidado?.descripcion,
+          baseAlumno?.descripcion_modulo,
+          baseAlumno?.descripcion
+        );
+
+        const observacionesFinales = primerTexto(
+          mod.observaciones,
+          comentarioRevFinal,
+          asigLocal?.observaciones,
+          expAnidado?.observaciones
+        );
+
+        const portafolioFinal = Boolean(
+          mod.portafolio ||
+            esVerdadero(revGuardada?.portafolio_conforme) ||
+            esVerdadero(revGuardada?.portafolio_fisico_revisado) ||
+            esVerdadero(asigLocal?.portafolio_conforme) ||
+            esVerdadero(asigLocal?.portafolio_fisico_revisado)
+        );
+
+        const estadoModuloFinal = primerTexto(
+          revGuardada?.estado_efsrt,
+          revGuardada?.estado_modulo,
+          revGuardada?.estado,
+          mod.estado_efsrt,
+          asigLocal?.estado_registro,
+          asigLocal?.estado,
+          expAnidado?.estado,
+          mod.estado_modulo
+        );
+
+        return {
+          ...mod,
+          horas_acumuladas: horasFinales,
+          horas_requeridas: horasRequeridasFinales,
+          portafolio: portafolioFinal,
+          periodo_academico: periodoFinal,
+          empresa_entidad: empresaFinal,
+          docente: docenteFinal,
+          responsable: supervisorFinal,
+          fecha_inicio: fechaInicioFinal,
+          fecha_fin: fechaFinFinal,
+          lugar: ubicacionFinal,
+          descripcion: descripcionFinal,
+          nota: notaFinal,
+          estado_revision: estadoRevFinal,
+          comentario_revision: comentarioRevFinal,
+          observaciones: observacionesFinales,
+          estado_modulo: estadoModuloFinal,
+          evidencias: evsDelModulo,
+        };
+      });
+
+      setModulos(lista);
+
+      setModuloActivoId((actual) => {
+        if (actual && lista.some((m) => String(m.id_expediente) === String(actual))) {
+          return actual;
+        }
+        const coincidenteAlumno = lista.find(
+          (m) => Number(m.numero_modulo) === Number(numeroModuloAlumno)
+        );
+        return coincidenteAlumno?.id_expediente ?? lista[0]?.id_expediente ?? null;
+      });
+    } catch (error) {
+      setAviso(error.message);
+    } finally {
+      setCargando(false);
+    }
   };
 
   useEffect(() => {
     setDetalle(null);
     setModulos([]);
     setModuloActivoId(null);
-    setDocumentoPrevio(null);
-    if (idEstudiante) cargar();
-    else setCargando(false);
-  }, [idEstudiante]);
+    setSeccionActiva("resumen");
 
-  // Oculta el mensaje de éxito automáticamente
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idEstudiante, syncTick]);
+
   useEffect(() => {
-    if (!mensajeExito) return;
-    const t = setTimeout(() => setMensajeExito(""), 4500);
-    return () => clearTimeout(t);
-  }, [mensajeExito]);
+    const actualizarSync = () => setSyncTick((n) => n + 1);
+    window.addEventListener("expediente:actualizado", actualizarSync);
+    window.addEventListener("revision:actualizada", actualizarSync);
+    window.addEventListener("storage", actualizarSync);
+    return () => {
+      window.removeEventListener("expediente:actualizado", actualizarSync);
+      window.removeEventListener("revision:actualizada", actualizarSync);
+      window.removeEventListener("storage", actualizarSync);
+    };
+  }, []);
 
-  const combinado = { ...sinVacios(estudiante), ...sinVacios(detalle) };
-  const datos = { ...combinado, direccion: combinado.direccion ?? combinado.dir_est ?? "" };
+  const combinado = {
+    ...sinVacios(estudianteRespaldo),
+    ...sinVacios(detalle),
+  };
+
+  const datos = {
+    ...combinado,
+    direccion: primerTexto(
+      combinado.direccion,
+      combinado.dir_est,
+      combinado.domicilio
+    ),
+  };
+
+  const nombreCompleto =
+    [datos.apellidos, datos.nombres]
+      .filter(Boolean)
+      .join(", ") ||
+    datos.nombre ||
+    "Estudiante";
 
   const moduloActual = useMemo(
-    () => modulos.find((m) => String(m.id_expediente) === String(moduloActivoId)) || modulos[0] || null,
+    () =>
+      modulos.find(
+        (m) =>
+          String(m.id_expediente) ===
+          String(moduloActivoId)
+      ) || null,
     [modulos, moduloActivoId]
   );
 
-  const actualizarCampoModulo = (campo, valor) => {
-    if (!moduloActual) return;
-    setMensajeExito("");
-    setModulos((prev) =>
-      prev.map((m) => (String(m.id_expediente) === String(moduloActual.id_expediente) ? { ...m, [campo]: valor } : m))
-    );
+  const numeroModulo = Math.max(
+    1,
+    Number(moduloActual?.numero_modulo || 1)
+  );
+
+  const romano = ROMANOS[numeroModulo - 1] || String(numeroModulo);
+
+  const horasOk =
+    !!moduloActual &&
+    moduloActual.horas_acumuladas >= moduloActual.horas_requeridas;
+  const portafolioOk = !!moduloActual?.portafolio;
+  const validadoOk =
+    String(moduloActual?.estado_modulo || "")
+      .toLowerCase()
+      .includes("validado") ||
+    String(moduloActual?.estado_modulo || "")
+      .toLowerCase()
+      .includes("apto") ||
+    String(moduloActual?.estado_modulo || "")
+      .toLowerCase()
+      .includes("listo") ||
+    String(moduloActual?.estado_modulo || "")
+      .toLowerCase()
+      .includes("emitid");
+
+  const totalHoras = modulos.reduce(
+    (total, m) => total + m.horas_acumuladas,
+    0
+  );
+
+  const totalDocumentos = modulos.reduce(
+    (total, m) => total + m.evidencias.length,
+    0
+  );
+
+  const docenteActivo = moduloActual?.docente || datos.docente_nombre || datos.docente || datos.asesor || null;
+
+  const datosCabecera = {
+    ...datos,
+    horas_acumuladas: totalHoras,
+    docente: docenteActivo,
   };
 
-  const cambiarEstadoEvidencia = (idEvidencia, nuevoEstado) => {
-    if (!moduloActual) return;
-    setMensajeExito("");
-    setModulos((prev) =>
-      prev.map((m) => {
-        if (String(m.id_expediente) !== String(moduloActual.id_expediente)) return m;
-        return { ...m, evidencias: m.evidencias.map((ev) => (ev.id === idEvidencia ? { ...ev, estado: nuevoEstado } : ev)) };
-      })
-    );
-  };
+  const actividades = moduloActual?.actividades || [];
+  const evidencias = moduloActual?.evidencias || [];
+  const seguimientos = moduloActual?.seguimientos || [];
+  const historial = moduloActual?.historial || [];
+  const observaciones = moduloActual?.observaciones || "";
 
-  const guardarCambiosModulo = async (e) => {
-    e.preventDefault();
-    if (!moduloActual) return;
+  const documentosAlumno = useMemo(() => {
+    if (Array.isArray(datos.documentos) && datos.documentos.length > 0) {
+      return datos.documentos;
+    }
+    return evidencias.map((ev) => ({
+      id: ev.id,
+      nombre: ev.nombre,
+      fecha: ev.fecha,
+      estado: ev.estado_revision || (ev.nota !== null ? "Aprobado" : "Pendiente"),
+    }));
+  }, [datos.documentos, evidencias]);
 
-    setGuardandoModulo(true);
-    setAviso("");
-    setMensajeExito("");
+  const eventos = useMemo(() => {
+    if (!moduloActual) return [];
 
-    try {
-      const res = await fetch(
-        `${API}/estudiantes/${idEstudiante}/expediente-modulos/${moduloActual.id_modulo}`,
-        { method: "PUT", headers: cabeceras(), body: JSON.stringify(moduloActual) }
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || `Error ${res.status}`);
+    const registros = [
+      ...historial.map((item) => ({
+        ...item,
+        tipo: item.tipo || "Historial",
+      })),
+
+      ...actividades.map((item) => ({
+        ...item,
+        tipo: "Actividad",
+      })),
+
+      ...seguimientos.map((item) => ({
+        ...item,
+        tipo: "Seguimiento",
+      })),
+    ];
+
+    if (
+      moduloActual.nota !== null ||
+      moduloActual.estado_revision ||
+      moduloActual.comentario_revision
+    ) {
+      const partesNota = [];
+      if (moduloActual.nota !== null) {
+        partesNota.push(`Nota / Calificación: ${moduloActual.nota}`);
       }
-      setMensajeExito(`Cambios guardados en "${moduloActual.nombre_modulo}".`);
-    } catch {
-      setMensajeExito(`Cambios aplicados en "${moduloActual.nombre_modulo}" (listos para sincronizar con el servidor).`);
-    } finally {
-      setGuardandoModulo(false);
+      if (moduloActual.estado_revision) {
+        partesNota.push(`Estado de revisión: ${moduloActual.estado_revision}`);
+      }
+      if (moduloActual.comentario_revision) {
+        partesNota.push(moduloActual.comentario_revision);
+      }
+
+      registros.push({
+        nombre: `Revisión registrada · ${moduloActual.nombre_modulo}`,
+        descripcion: partesNota.join(" · "),
+        tipo: "Revisión",
+        fecha: "",
+      });
     }
-  };
 
-  // Reglas de negocio (sin cambios)
-  const notaNumerica =
-    moduloActual?.nota === "" || moduloActual?.nota === null ? null : Number(moduloActual?.nota);
-  const tieneNota = notaNumerica !== null && !Number.isNaN(notaNumerica);
-  const evidenciasAprobadas = moduloActual ? moduloActual.evidencias.every((ev) => ev.estado === "Aprobado") : false;
-  const puedeGenerarActa = tieneNota;
-  const puedeGenerarConstancia = tieneNota && notaNumerica >= 13 && evidenciasAprobadas;
-  const notaAprobatoria = tieneNota && notaNumerica >= 13;
+    if (observaciones) {
+      registros.push({
+        nombre: "Observaciones del módulo",
+        descripcion: observaciones,
+        tipo: "Observación",
+        fecha: "",
+      });
+    }
 
-  const guardarDatos = async (cambios) => {
-    const res = await fetch(`${API}/estudiantes/${idEstudiante}`, {
-      method: "PUT",
-      headers: cabeceras(),
-      body: JSON.stringify(cambios),
+    return registros.sort((a, b) => {
+      const fa = new Date(obtenerFecha(a) || 0).getTime();
+      const fb = new Date(obtenerFecha(b) || 0).getTime();
+
+      return fb - fa;
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const errores = data.errors ? Object.values(data.errors).flat().join(" ") : "";
-      throw new Error(errores || data.message || "No se pudo guardar");
-    }
-    await cargar();
-  };
+  }, [moduloActual, historial, actividades, seguimientos, observaciones]);
 
-  if (!estudiante) {
+  const eventosFiltrados = eventos.filter((item) => {
+    const texto = [
+      obtenerNombre(item),
+      item.descripcion,
+      item.tipo,
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return texto.includes(busqueda.toLowerCase());
+  });
+
+  const secciones = [
+    {
+      id: "resumen",
+      nombre: "Información general",
+      icon: Info,
+    },
+    {
+      id: "actividades",
+      nombre: "Actividades",
+      icon: ClipboardList,
+    },
+    {
+      id: "seguimiento",
+      nombre: "Seguimiento",
+      icon: History,
+    },
+    {
+      id: "documentos",
+      nombre: "Documentación",
+      icon: FolderOpen,
+    },
+  ];
+
+  const panel = darkMode
+    ? "border-[#1e335c] bg-[#0b1b3a] text-slate-100"
+    : "border-slate-200 bg-white text-slate-800";
+
+  const subpanel = darkMode
+    ? "border-[#1e335c] bg-[#0f172a]"
+    : "border-slate-200 bg-slate-50";
+
+  const textoSecundario = darkMode
+    ? "text-slate-400"
+    : "text-slate-500";
+
+  if (!estudianteRespaldo) {
     return (
-      <div className="space-y-3 text-sm">
-        <p className="text-slate-500">No hay un estudiante seleccionado.</p>
-        {onVolver && (
-          <button onClick={onVolver} className="font-semibold text-blue-600 hover:text-blue-700">
-            Volver a estudiantes
-          </button>
-        )}
+      <div className="p-5 text-sm text-slate-500">
+        No hay un estudiante seleccionado.
+        <button
+          onClick={onVolver}
+          className="ml-2 font-semibold text-blue-600"
+        >
+          Volver
+        </button>
       </div>
     );
   }
 
-  const nombreCompleto =
-    [datos.apellidos, datos.nombres].filter(Boolean).join(", ") || datos.nombre || "Estudiante EFSRT";
-
-  /* ───────────── Tema ───────────── */
-  const t = darkMode
-    ? {
-        panel: "border-[#1e335c] bg-[#0b1b3a] text-slate-100",
-        sub: "bg-[#0f172a] border-[#1e335c]",
-        input: "border-[#1e335c] bg-[#0f172a] text-slate-100 placeholder:text-slate-500",
-        muted: "text-slate-400",
-        linea: "border-[#1e335c]",
-        tabIdle: "border-[#1e335c] bg-[#0f172a] text-slate-300 hover:border-blue-500",
-      }
-    : {
-        panel: "border-slate-200 bg-white text-slate-800",
-        sub: "bg-slate-50 border-slate-200",
-        input: "border-slate-200 bg-white text-slate-800 placeholder:text-slate-400",
-        muted: "text-slate-500",
-        linea: "border-slate-200",
-        tabIdle: "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:shadow-md",
-      };
-
-  const campo = `w-full rounded-xl border px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 disabled:cursor-not-allowed disabled:opacity-60 ${t.input}`;
-
-  const pctHoras = moduloActual
-    ? Math.min(100, Math.round((moduloActual.horas_acumuladas / (moduloActual.horas_requeridas || 1)) * 100))
-    : 0;
-  const nEvidAprob = moduloActual ? moduloActual.evidencias.filter((e) => e.estado === "Aprobado").length : 0;
-  const nEvid = moduloActual ? moduloActual.evidencias.length : 0;
-
-  const pctModulo = (m) => Math.min(100, Math.round((m.horas_acumuladas / (m.horas_requeridas || 1)) * 100));
-
   return (
-    <div className="space-y-5">
+    <div className={`exp-entrada space-y-6 ${darkMode ? "text-slate-100" : ""}`}>
       <style>{ESTILOS}</style>
 
-      <div className="exp-fade-up">
-        <CabeceraExpediente estudiante={datos} onVolver={onVolver} darkMode={darkMode} puedeAsignar={esAdmin} />
-      </div>
+      <CabeceraExpediente
+        estudiante={datosCabecera}
+        docente={docenteActivo}
+        onVolver={onVolver}
+        darkMode={darkMode}
+        puedeAsignar={false}
+      />
 
       {aviso && (
-        <p className="exp-toast flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
-          <Icono d={I.alert} />
-          <span>
-            {aviso}{" "}
-            <button onClick={cargar} className="font-semibold underline">
-              Reintentar
-            </button>
-          </span>
-        </p>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <span>{aviso}</span>
+
+          <button
+            onClick={cargar}
+            className="flex shrink-0 items-center gap-2 font-semibold"
+          >
+            <RefreshCw size={15} />
+            Reintentar
+          </button>
+        </div>
       )}
 
-      {mensajeExito && (
-        <p className="exp-toast flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700 shadow-sm">
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white">
-            <Icono d={I.check} className="h-3 w-3" />
-          </span>
-          {mensajeExito}
-        </p>
-      )}
+      <div className="grid items-start gap-4 lg:grid-cols-[300px_1fr]">
+        <ResumenAlumno
+          estudiante={datos}
+          docente={docenteActivo}
+          darkMode={darkMode}
+        />
 
-      {/* Expediente general del alumno */}
-      <div
-        style={{ animationDelay: ".08s" }}
-        className={`exp-fade-up grid items-start gap-4 transition-opacity duration-500 lg:grid-cols-[300px_1fr] ${
-          cargando && !detalle ? "opacity-60" : "opacity-100"
-        }`}
-      >
-        <ResumenAlumno estudiante={datos} darkMode={darkMode} />
-        <DatosPersonales estudiante={datos} darkMode={darkMode} puedeEditar={esAdmin} onGuardar={guardarDatos} />
+        <DatosPersonales
+          estudiante={datos}
+          darkMode={darkMode}
+          puedeEditar={false}
+        />
       </div>
 
-      {/* ═════════════ Expediente por Módulos EFSRT ═════════════ */}
-      <section
-        style={{ animationDelay: ".16s" }}
-        className={`exp-fade-up space-y-6 overflow-hidden rounded-3xl border p-5 shadow-sm md:p-7 ${t.panel}`}
-      >
-        {/* Encabezado */}
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-          <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/30">
-              <Icono d={I.layers} className="h-5 w-5" />
-            </span>
+      <DocumentosAlumnos
+        estudiante={{ ...datos, documentos: documentosAlumno }}
+        darkMode={darkMode}
+      />
+
+      <div className={`overflow-hidden rounded-2xl border ${panel}`}>
+        <div className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center md:p-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white">
+              <FolderOpen size={24} />
+            </div>
+
             <div>
-              <h2 className="text-lg font-bold leading-tight">Expediente por Módulos EFSRT</h2>
-              <p className={`mt-0.5 max-w-xl text-xs ${t.muted}`}>
-                Elige un módulo para revisar su avance, validar evidencias, registrar la nota y emitir documentos.
+              <p className="text-[10px] font-bold uppercase tracking-[.18em] text-blue-600">
+                Registro institucional
+              </p>
+
+              <h2 className="text-xl font-extrabold">
+                Expediente Integral
+              </h2>
+
+              <p className={`text-xs ${textoSecundario}`}>
+                Historial académico, revisión y seguimiento del estudiante
               </p>
             </div>
           </div>
-          <span className="w-fit rounded-full bg-blue-50 px-3.5 py-1.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
-            {modulos.length} {modulos.length === 1 ? "módulo" : "módulos"} en historial
-          </span>
+
+          <div className="flex flex-wrap gap-2">
+            <span className={`rounded-lg border px-3 py-2 font-mono text-xs ${subpanel}`}>
+              EXP-{String(idEstudiante).padStart(4, "0")}
+            </span>
+
+            <span className="flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
+              <CircleUserRound size={14} />
+              Expediente individual
+            </span>
+          </div>
         </div>
 
-        {/* Selector de módulos: tarjetas con anillo de progreso */}
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {modulos.map((mod, idx) => {
-            const activo = String(mod.id_expediente) === String(moduloActual?.id_expediente);
-            const pct = pctModulo(mod);
-            const conNota = mod.nota !== "" && mod.nota !== null;
-            return (
-              <button
-                key={mod.id_expediente}
-                type="button"
-                style={{ animationDelay: `${0.2 + idx * 0.06}s` }}
-                onClick={() => {
-                  setModuloActivoId(mod.id_expediente);
-                  setDocumentoPrevio(null);
-                }}
-                className={`exp-card exp-slide-in flex items-center gap-3.5 rounded-2xl border p-3.5 text-left ${
-                  activo
-                    ? "border-transparent bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/25"
-                    : t.tabIdle
-                }`}
-              >
-                <div className={activo ? "text-white" : "text-blue-600"}>
-                  <AnilloProgreso valor={pct}>{pct}%</AnilloProgreso>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{mod.nombre_modulo}</p>
-                  <p className={`text-[11px] ${activo ? "text-blue-100" : t.muted}`}>
-                    Periodo {mod.periodo_academico}
-                  </p>
-                  <span
-                    className={`mt-1.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      activo
-                        ? "bg-white/20 text-white"
-                        : conNota
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    {conNota ? `Nota ${mod.nota}` : "Sin nota"}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+        <div className={`grid grid-cols-2 border-t md:grid-cols-4 ${darkMode ? "border-[#1e335c]" : "border-slate-200"}`}>
+          {[
+            {
+              icon: UserRound,
+              nombre: "Estudiante",
+              valor: nombreCompleto,
+            },
+            {
+              icon: GraduationCap,
+              nombre: "Carrera",
+              valor:
+                datos.carrera_nombre ||
+                datos.carrera ||
+                datos.programa_estudios ||
+                "No registrado",
+            },
+            {
+              icon: Building2,
+              nombre: "Centro de prácticas",
+              valor: moduloActual?.empresa_entidad || "Sin empresa asignada",
+            },
+            {
+              icon: Layers3,
+              nombre: "Módulos",
+              valor: `${modulos.length} registrados`,
+            },
+          ].map((item, i) => (
+            <div
+              key={item.nombre}
+              className={`min-w-0 p-4 ${
+                i % 2 === 0 ? "" : "border-l border-slate-200"
+              } ${i > 1 ? "border-t md:border-t-0" : ""} ${darkMode ? "border-[#1e335c]" : ""}`}
+            >
+              <p className={`mb-1 flex items-center gap-1.5 text-[10px] ${textoSecundario}`}>
+                <item.icon size={13} />
+                {item.nombre}
+              </p>
+
+              <p className="truncate text-xs font-bold">
+                {item.valor}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[
+          {
+            titulo: "Módulos EFSRT",
+            valor: modulos.length,
+            detalle: "Módulos I, II y III",
+            icon: Layers3,
+            color: "blue",
+          },
+          {
+            titulo: "Horas registradas",
+            valor: totalHoras,
+            detalle: "Acumulado de los módulos",
+            icon: Clock3,
+            color: "violet",
+          },
+          {
+            titulo: "Evidencias / Documentos",
+            valor: totalDocumentos,
+            detalle: "Archivos y revisiones asociadas",
+            icon: FileText,
+            color: "emerald",
+          },
+        ].map((item) => (
+          <div
+            key={item.titulo}
+            className={`exp-tarjeta rounded-2xl border p-4 ${panel}`}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className={`text-xs ${textoSecundario}`}>
+                  {item.titulo}
+                </p>
+
+                <p className="mt-1 text-2xl font-extrabold">
+                  {item.valor}
+                </p>
+
+                <p className={`mt-1 text-[10px] ${textoSecundario}`}>
+                  {item.detalle}
+                </p>
+              </div>
+
+              <IconoSeccion icon={item.icon} color={item.color} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-base font-extrabold">
+            Historial de módulos EFSRT
+          </h2>
+
+          <p className={`mt-1 text-xs ${textoSecundario}`}>
+            Selecciona un módulo para consultar su empresa, revisión, nota y evidencias.
+          </p>
         </div>
 
-        {/* Detalle del módulo seleccionado */}
-        {moduloActual && (
-          <form key={moduloActual.id_expediente} onSubmit={guardarCambiosModulo} className="exp-fade-up space-y-6">
-            {/* Resumen visual */}
-            <div className={`rounded-2xl border p-4 md:p-5 ${t.sub}`}>
-              <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-                <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-wider ${t.muted}`}>Módulo seleccionado</p>
-                  <h3 className="text-base font-bold">{moduloActual.nombre_modulo}</h3>
-                </div>
-                <span className="w-fit rounded-full bg-blue-600/10 px-3 py-1 text-xs font-semibold text-blue-600">
-                  {moduloActual.estado_modulo}
-                </span>
-              </div>
+        {cargando ? (
+          <div className={`flex items-center justify-center gap-3 rounded-xl border p-10 ${panel}`}>
+            <RefreshCw className="animate-spin text-blue-600" size={20} />
+            <span className="text-sm">Cargando expediente...</span>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-3">
+            {modulos.map((mod, index) => {
+              const activo =
+                String(mod.id_expediente) ===
+                String(moduloActivoId);
 
-              {/* Barra de horas */}
-              <div className="mt-4">
-                <div className="mb-1.5 flex items-end justify-between text-xs">
-                  <span className={`font-semibold ${t.muted}`}>Avance de horas</span>
-                  <span className="font-bold">
-                    {moduloActual.horas_acumuladas}
-                    <span className={`font-medium ${t.muted}`}> / {moduloActual.horas_requeridas} h</span>
-                  </span>
-                </div>
-                <div className={`relative h-2.5 overflow-hidden rounded-full ${darkMode ? "bg-slate-700/60" : "bg-slate-200"}`}>
-                  <div
-                    className={`exp-shine relative h-full overflow-hidden rounded-full bg-gradient-to-r ${
-                      pctHoras >= 100 ? "from-emerald-500 to-teal-400" : "from-blue-600 to-indigo-500"
-                    }`}
-                    style={{ width: `${pctHoras}%`, transition: "width .9s cubic-bezier(.22,1,.36,1)" }}
-                  />
-                </div>
-              </div>
+              const numMod = mod.numero_modulo || index + 1;
+              const metaHoras = mod.horas_requeridas || 160;
+              const porcentaje = metaHoras
+                ? Math.min(
+                    100,
+                    Math.round((mod.horas_acumuladas / metaHoras) * 100)
+                  )
+                : 0;
 
-              {/* Mini métricas */}
-              <div className="mt-4 grid grid-cols-3 gap-3">
-                {[
-                  { et: "Horas", val: `${pctHoras}%`, ic: I.clock, color: "text-blue-600 bg-blue-50" },
-                  { et: "Evidencias", val: `${nEvidAprob}/${nEvid}`, ic: I.file, color: "text-violet-600 bg-violet-50" },
-                  {
-                    et: "Nota",
-                    val: tieneNota ? notaNumerica : "—",
-                    ic: I.star,
-                    color: !tieneNota
-                      ? "text-slate-500 bg-slate-100"
-                      : notaAprobatoria
-                      ? "text-emerald-600 bg-emerald-50"
-                      : "text-rose-600 bg-rose-50",
-                  },
-                ].map((m) => (
-                  <div key={m.et} className={`exp-pop flex items-center gap-2.5 rounded-xl border p-3 ${t.panel}`}>
-                    <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${m.color}`}>
-                      <Icono d={m.ic} />
-                    </span>
-                    <div>
-                      <p className="text-sm font-bold leading-none">{m.val}</p>
-                      <p className={`mt-1 text-[10px] ${t.muted}`}>{m.et}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Datos del módulo */}
-            <div className="grid gap-4 md:grid-cols-3">
-              <div>
-                <label className={`mb-1.5 flex items-center gap-1.5 text-xs font-semibold ${t.muted}`}>
-                  <Icono d={I.building} className="h-3.5 w-3.5" /> Centro de Prácticas / Proyecto
-                </label>
-                <input
-                  type="text"
-                  disabled={!puedeGestionarModulo}
-                  value={moduloActual.empresa_entidad}
-                  onChange={(e) => actualizarCampoModulo("empresa_entidad", e.target.value)}
-                  placeholder="Ej. Empresa / Proyecto EFSRT"
-                  className={campo}
-                />
-              </div>
-
-              <div>
-                <label className={`mb-1.5 flex items-center gap-1.5 text-xs font-semibold ${t.muted}`}>
-                  <Icono d={I.clock} className="h-3.5 w-3.5" /> Horas acumuladas
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="0"
-                    disabled={!puedeGestionarModulo}
-                    value={moduloActual.horas_acumuladas}
-                    onChange={(e) => actualizarCampoModulo("horas_acumuladas", Number(e.target.value))}
-                    className={`${campo} pr-16`}
-                  />
-                  <span className={`pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs ${t.muted}`}>
-                    / {moduloActual.horas_requeridas} h
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className={`mb-1.5 flex items-center gap-1.5 text-xs font-semibold ${t.muted}`}>
-                  <Icono d={I.star} className="h-3.5 w-3.5" /> Nota del módulo (0 - 20)
-                </label>
-                <input
-                  type="number"
-                  step="0.5"
-                  min="0"
-                  max="20"
-                  disabled={!puedeGestionarModulo}
-                  value={moduloActual.nota}
-                  onChange={(e) => actualizarCampoModulo("nota", e.target.value)}
-                  placeholder="Ej. 16"
-                  className={`${campo} font-bold`}
-                />
-              </div>
-            </div>
-
-            {/* Evidencias */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold">Evidencias del módulo</h3>
-                <span className={`text-xs ${t.muted}`}>
-                  {nEvidAprob} de {nEvid} aprobadas
-                </span>
-              </div>
-
-              <div className="grid gap-3">
-                {moduloActual.evidencias.map((ev, i) => {
-                  const cfg = ESTADOS_EVIDENCIA[ev.estado] || ESTADOS_EVIDENCIA.Pendiente;
-                  return (
-                    <div
-                      key={ev.id}
-                      style={{ animationDelay: `${i * 0.07}s` }}
-                      className={`exp-card exp-slide-in flex flex-col justify-between gap-3 rounded-2xl border p-3.5 sm:flex-row sm:items-center ${t.sub}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-300 ${cfg.suave}`}>
-                          <Icono d={cfg.icono} />
-                        </span>
-                        <div>
-                          <p className="text-sm font-semibold leading-snug">{ev.nombre}</p>
-                          <p className={`text-xs ${t.muted}`}>
-                            {ev.archivo ? `Archivo: ${ev.archivo}` : "Control interno de expediente"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Control segmentado de estado */}
-                      <div className={`flex shrink-0 gap-1 rounded-xl border p-1 ${darkMode ? "border-[#1e335c] bg-[#0b1b3a]" : "border-slate-200 bg-white"}`}>
-                        {Object.keys(ESTADOS_EVIDENCIA).map((est) => {
-                          const sel = ev.estado === est;
-                          return (
-                            <button
-                              key={est}
-                              type="button"
-                              disabled={!puedeGestionarModulo}
-                              onClick={() => cambiarEstadoEvidencia(ev.id, est)}
-                              className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${
-                                sel ? `${ESTADOS_EVIDENCIA[est].activo} shadow` : `${t.muted} hover:bg-slate-500/10`
-                              }`}
-                            >
-                              {est}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Observaciones */}
-            <div>
-              <label className={`mb-1.5 flex items-center gap-1.5 text-xs font-semibold ${t.muted}`}>
-                <Icono d={I.pen} className="h-3.5 w-3.5" /> Observaciones de supervisión
-              </label>
-              <textarea
-                rows={3}
-                disabled={!puedeGestionarModulo}
-                value={moduloActual.observaciones}
-                onChange={(e) => actualizarCampoModulo("observaciones", e.target.value)}
-                placeholder="Notas o indicaciones sobre el desempeño del módulo..."
-                className={`${campo} resize-none`}
-              />
-            </div>
-
-            {/* Documentos + requisitos */}
-            <div className={`grid gap-4 rounded-2xl border p-4 md:grid-cols-[1fr_auto] md:p-5 ${t.sub}`}>
-              <div>
-                <h3 className="mb-2.5 text-sm font-bold">Requisitos para emitir documentos</h3>
-                <ul className="space-y-1.5">
-                  <Requisito darkMode={darkMode} cumplido={tieneNota} texto="Nota registrada (para el Acta de Notas)" />
-                  <Requisito darkMode={darkMode} cumplido={notaAprobatoria} texto="Nota aprobatoria, mínimo 13 (para la Constancia)" />
-                  <Requisito darkMode={darkMode} cumplido={evidenciasAprobadas} texto="Todas las evidencias en estado Aprobado" />
-                </ul>
-              </div>
-
-              <div className="flex flex-col justify-center gap-2.5 sm:min-w-[240px]">
+              return (
                 <button
                   type="button"
-                  disabled={!puedeGenerarActa}
-                  onClick={() => setDocumentoPrevio("acta")}
-                  className="group flex items-center justify-center gap-2 rounded-xl border-2 border-blue-600 px-4 py-2.5 text-xs font-bold text-blue-600 transition hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400 disabled:hover:bg-transparent disabled:hover:text-slate-400"
-                >
-                  <Icono d={puedeGenerarActa ? I.doc : I.lock} />
-                  Ver Acta de Notas
-                </button>
-
-                <button
-                  type="button"
-                  disabled={!puedeGenerarConstancia}
-                  title={
-                    !puedeGenerarConstancia
-                      ? "Requiere nota aprobatoria (>= 13) y todas las evidencias en Aprobado"
-                      : "Generar constancia de cumplimiento"
-                  }
-                  onClick={() => setDocumentoPrevio("constancia")}
-                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold text-white transition disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 ${
-                    puedeGenerarConstancia
-                      ? "exp-pulse bg-gradient-to-r from-emerald-600 to-teal-500 shadow-lg shadow-emerald-600/25 hover:brightness-110"
-                      : ""
+                  key={mod.id_expediente}
+                  onClick={() => {
+                    setModuloActivoId(mod.id_expediente);
+                    setSeccionActiva("resumen");
+                    setBusqueda("");
+                  }}
+                  className={`exp-tarjeta rounded-2xl border p-4 text-left ${
+                    activo
+                      ? "border-blue-600 bg-blue-50/50 ring-2 ring-blue-600/10"
+                      : panel
                   }`}
                 >
-                  <Icono d={puedeGenerarConstancia ? I.award : I.lock} />
-                  Constancia de Cumplimiento
-                </button>
-              </div>
-            </div>
-
-            {/* Guardar */}
-            {puedeGestionarModulo && (
-              <div className={`flex justify-end border-t pt-4 ${t.linea}`}>
-                <button
-                  type="submit"
-                  disabled={guardandoModulo}
-                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition hover:brightness-110 active:scale-[.98] disabled:opacity-50"
-                >
-                  {guardandoModulo ? (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  ) : (
-                    <Icono d={I.save} />
-                  )}
-                  {guardandoModulo ? "Guardando..." : "Guardar cambios del módulo"}
-                </button>
-              </div>
-            )}
-          </form>
-        )}
-
-        {/* Vista previa del documento */}
-        {documentoPrevio && moduloActual && (
-          <div className="exp-pop overflow-hidden rounded-2xl border border-slate-300 bg-white text-slate-800 shadow-xl">
-            <div
-              className={`flex items-center justify-between px-5 py-3 text-white ${
-                documentoPrevio === "acta"
-                  ? "bg-gradient-to-r from-blue-700 to-indigo-600"
-                  : "bg-gradient-to-r from-emerald-700 to-teal-600"
-              }`}
-            >
-              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest">
-                <Icono d={documentoPrevio === "acta" ? I.doc : I.award} />
-                {documentoPrevio === "acta" ? "Acta de Evaluación / Notas del Módulo" : "Constancia de Cumplimiento EFSRT"}
-              </span>
-              <button
-                type="button"
-                onClick={() => setDocumentoPrevio(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/15 transition hover:bg-white/30"
-                aria-label="Cerrar vista previa"
-              >
-                <Icono d={I.close} className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            <div className="space-y-4 p-6 text-sm leading-relaxed">
-              {documentoPrevio === "acta" ? (
-                <>
-                  <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                    {[
-                      ["Estudiante", nombreCompleto],
-                      ["DNI", datos.dni || "S/N"],
-                      ["Módulo", moduloActual.nombre_modulo],
-                      ["Periodo académico", moduloActual.periodo_academico],
-                      ["Horas acumuladas", `${moduloActual.horas_acumuladas} h`],
-                    ].map(([k, v]) => (
-                      <div key={k} className="border-b border-slate-100 pb-2">
-                        <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt>
-                        <dd className="font-semibold">{v}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <div className="flex items-center justify-between rounded-xl bg-slate-50 px-5 py-4">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nota registrada</span>
-                    <span className={`text-3xl font-extrabold ${notaAprobatoria ? "text-emerald-600" : "text-rose-600"}`}>
-                      {moduloActual.nota}
+                  <div className="flex items-center justify-between">
+                    <span className={`flex h-11 w-11 items-center justify-center rounded-xl text-sm font-extrabold ${
+                      activo
+                        ? "bg-blue-600 text-white"
+                        : "bg-blue-50 text-blue-600"
+                    }`}>
+                      {ROMANOS[numMod - 1] || numMod}
                     </span>
+
+                    <div className="flex items-center gap-1.5">
+                      {mod.nota !== null && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                          <Award size={12} />
+                          Nota: {mod.nota}
+                        </span>
+                      )}
+                      <ChevronRight
+                        size={18}
+                        className={activo ? "text-blue-600" : textoSecundario}
+                      />
+                    </div>
                   </div>
-                </>
-              ) : (
-                <div className="py-2 text-center">
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Se deja constancia de que</p>
-                  <p className="my-2 text-xl font-extrabold">{nombreCompleto}</p>
-                  <p className="mx-auto max-w-xl text-slate-600">
-                    culminó y aprobó satisfactoriamente el{" "}
-                    <strong className="text-slate-800">{moduloActual.nombre_modulo}</strong> (periodo{" "}
-                    {moduloActual.periodo_academico}) con{" "}
-                    <strong className="text-slate-800">{moduloActual.horas_acumuladas} horas</strong> y evidencias
-                    conformes.
-                  </p>
-                </div>
-              )}
-            </div>
+
+                  <div className="mt-4">
+                    <p className={`text-[10px] font-bold uppercase tracking-wider ${textoSecundario}`}>
+                      Módulo {ROMANOS[numMod - 1] || numMod} · {metaHoras}h req.
+                    </p>
+
+                    <h3 className="mt-1 text-sm font-bold">
+                      {mod.nombre_modulo}
+                    </h3>
+
+                    <p className={`mt-1 truncate text-xs ${textoSecundario}`}>
+                      {mod.empresa_entidad ||
+                        mod.periodo_academico ||
+                        "Sin empresa / periodo"}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-[11px]">
+                      <span className={textoSecundario}>
+                        Horas registradas
+                      </span>
+
+                      <span className="font-bold">
+                        {mod.horas_acumuladas} / {metaHoras} h
+                      </span>
+                    </div>
+
+                    <div className={`h-1.5 overflow-hidden rounded-full ${darkMode ? "bg-slate-700" : "bg-slate-200"}`}>
+                      <div
+                        className="h-full rounded-full bg-blue-600 transition-all"
+                        style={{ width: `${porcentaje}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <Estado valor={mod.estado_modulo} />
+
+                      <span className={`text-[10px] ${textoSecundario}`}>
+                        {mod.evidencias.length} evidencias
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </section>
+
+      {moduloActual && (
+        <section className={`overflow-hidden rounded-2xl border ${panel}`}>
+          <div className={`border-b p-5 md:p-6 ${darkMode ? "border-[#1e335c] bg-[#0f172a]" : "border-slate-200 bg-slate-50"}`}>
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[.2em] text-blue-600">
+                  Expediente / Módulo {romano}
+                </p>
+
+                <h2 className="mt-1 text-xl font-extrabold">
+                  {moduloActual.nombre_modulo}
+                </h2>
+
+                <div className={`mt-2 flex flex-wrap items-center gap-3 text-xs ${textoSecundario}`}>
+                  <span className="flex items-center gap-1">
+                    <Building2 size={13} />
+                    {moduloActual.empresa_entidad || "Sin empresa asignada"}
+                  </span>
+
+                  <span className="flex items-center gap-1">
+                    <FolderOpen size={13} />
+                    EXP-{String(idEstudiante).padStart(4, "0")}-M{moduloActual.numero_modulo}
+                  </span>
+
+                  {moduloActual.nota !== null && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                      <Award size={13} />
+                      Calificación: {moduloActual.nota}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <Estado valor={moduloActual.estado_modulo} />
+            </div>
+          </div>
+
+          <div className={`flex gap-1 overflow-x-auto border-b p-2 ${darkMode ? "border-[#1e335c]" : "border-slate-200"}`}>
+            {secciones.map((seccion) => {
+              const Icon = seccion.icon;
+              const activo = seccionActiva === seccion.id;
+
+              return (
+                <button
+                  key={seccion.id}
+                  onClick={() => setSeccionActiva(seccion.id)}
+                  className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-semibold transition ${
+                    activo
+                      ? "bg-blue-600 text-white"
+                      : `${textoSecundario} hover:bg-slate-100`
+                  }`}
+                >
+                  <Icon size={15} />
+                  {seccion.nombre}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="p-5 md:p-7">
+            {seccionActiva === "resumen" && (
+              <div className="exp-entrada space-y-8">
+                <Seccion
+                  titulo="Información del módulo"
+                  descripcion="Datos del módulo profesional y su avance de EFSRT"
+                  icon={Info}
+                >
+                  <div className={`grid gap-5 rounded-xl border p-5 sm:grid-cols-2 lg:grid-cols-3 ${subpanel}`}>
+                    <CampoInformacion
+                      etiqueta="Nombre del módulo"
+                      valor={moduloActual.nombre_modulo}
+                      icon={BookOpen}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Estado del EFSRT"
+                      valor={moduloActual.estado_modulo}
+                      icon={FileCheck2}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Horas acumuladas / requeridas"
+                      valor={`${moduloActual.horas_acumuladas} / ${moduloActual.horas_requeridas} horas`}
+                      icon={Clock3}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Portafolio físico"
+                      valor={
+                        portafolioOk ? "Revisado" : "Pendiente de revisión"
+                      }
+                      icon={ClipboardList}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Fecha de validación"
+                      valor={
+                        moduloActual.fecha_validacion
+                          ? fechaFormato(moduloActual.fecha_validacion)
+                          : "Aún no validado"
+                      }
+                      icon={CalendarClock}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Registro creado"
+                      valor={
+                        moduloActual.created_at
+                          ? fechaFormato(moduloActual.created_at)
+                          : "Sin registro"
+                      }
+                      icon={CalendarDays}
+                    />
+                  </div>
+                </Seccion>
+
+                <Seccion
+                  titulo="Centro de prácticas"
+                  descripcion="Empresa o institución y docente asesor del módulo"
+                  icon={Building2}
+                >
+                  <div className={`grid gap-5 rounded-xl border p-5 sm:grid-cols-2 lg:grid-cols-3 ${subpanel}`}>
+                    <CampoInformacion
+                      etiqueta="Empresa o institución"
+                      valor={moduloActual.empresa_entidad}
+                      icon={BriefcaseBusiness}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Ubicación"
+                      valor={moduloActual.lugar}
+                      icon={MapPin}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Docente asesor"
+                      valor={moduloActual.docente}
+                      icon={GraduationCap}
+                    />
+                  </div>
+                </Seccion>
+
+                <Seccion
+                  titulo="Ruta de validación"
+                  descripcion="Requisitos para que el módulo quede validado"
+                  icon={CheckCircle2}
+                >
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <PasoValidacion
+                      n={1}
+                      cumplido={horasOk}
+                      titulo="Horas completadas"
+                      detalle={`${moduloActual.horas_acumuladas} de ${moduloActual.horas_requeridas} h`}
+                      subpanel={subpanel}
+                      secundario={textoSecundario}
+                    />
+                    <PasoValidacion
+                      n={2}
+                      cumplido={portafolioOk}
+                      titulo="Portafolio físico"
+                      detalle={portafolioOk ? "Revisado" : "Pendiente de revisión"}
+                      subpanel={subpanel}
+                      secundario={textoSecundario}
+                    />
+                    <PasoValidacion
+                      n={3}
+                      cumplido={validadoOk}
+                      titulo="Validación del EFSRT"
+                      detalle={
+                        validadoOk && moduloActual.fecha_validacion
+                          ? fechaFormato(moduloActual.fecha_validacion)
+                          : moduloActual.estado_modulo
+                      }
+                      subpanel={subpanel}
+                      secundario={textoSecundario}
+                    />
+                  </div>
+                </Seccion>
+
+                <Seccion
+                  titulo="Resumen documental y revisión"
+                  descripcion="Evidencias y observaciones de revisión asociadas al módulo"
+                  icon={FileText}
+                >
+                  <div className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${subpanel}`}>
+                    <div className="flex items-center gap-3">
+                      <IconoSeccion
+                        icon={FolderOpen}
+                        color="blue"
+                      />
+
+                      <div>
+                        <p className="text-sm font-bold">
+                          Evidencias y documentación del módulo
+                        </p>
+
+                        <p className={`text-xs ${textoSecundario}`}>
+                          {moduloActual.comentario_revision ||
+                            "Archivos y registros asociados"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-sm font-bold text-blue-600">
+                      {evidencias.length} archivos
+                    </span>
+                  </div>
+                </Seccion>
+              </div>
+            )}
+
+            {seccionActiva === "actividades" && (
+              <div className="exp-entrada space-y-5">
+                <Seccion
+                  titulo="Actividades realizadas"
+                  descripcion="Registro de las actividades desarrolladas durante el módulo"
+                  icon={ClipboardList}
+                >
+                  {actividades.length > 0 ? (
+                    <div className="space-y-3">
+                      {actividades.map((actividad, i) => (
+                        <div
+                          key={actividad.id ?? i}
+                          className={`rounded-xl border p-4 ${subpanel}`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                              <ClipboardList size={17} />
+                            </span>
+
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-sm font-bold">
+                                {obtenerNombre(actividad)}
+                              </h4>
+
+                              <p className={`mt-1 whitespace-pre-wrap text-xs leading-6 ${textoSecundario}`}>
+                                {actividad.descripcion || "Sin descripción adicional."}
+                              </p>
+
+                              {obtenerFecha(actividad) && (
+                                <p className="mt-3 flex items-center gap-1.5 text-[11px] text-blue-600">
+                                  <CalendarDays size={13} />
+                                  {fechaFormato(obtenerFecha(actividad))}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EstadoVacio
+                      icon={ClipboardList}
+                      titulo="Sin actividades registradas"
+                      descripcion="Todavía no existen actividades asociadas a este módulo."
+                    />
+                  )}
+                </Seccion>
+              </div>
+            )}
+
+            {seccionActiva === "seguimiento" && (
+              <div className="exp-entrada space-y-6">
+                <div>
+                  <h3 className="text-sm font-bold">
+                    Historial del módulo
+                  </h3>
+
+                  <p className={`mt-1 text-xs ${textoSecundario}`}>
+                    Consulta cronológica de revisiones, actividades y registros disponibles.
+                  </p>
+                </div>
+
+                <div className="relative space-y-5 pl-5">
+                  {eventosFiltrados.length > 0 ? (
+                    <>
+                      <div className={`absolute bottom-4 left-[7px] top-2 w-px ${darkMode ? "bg-slate-700" : "bg-slate-200"}`} />
+
+                      {eventosFiltrados.map((evento, i) => (
+                        <div
+                          key={evento.id ?? i}
+                          className="relative"
+                        >
+                          <span className="absolute -left-5 top-1 flex h-4 w-4 items-center justify-center rounded-full border-2 border-blue-600 bg-white">
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                          </span>
+
+                          <div className={`rounded-xl border p-4 ${subpanel}`}>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-sm font-bold">
+                                {obtenerNombre(evento)}
+                              </span>
+
+                              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">
+                                {evento.tipo}
+                              </span>
+                            </div>
+
+                            <p className={`mt-2 whitespace-pre-wrap text-xs leading-6 ${textoSecundario}`}>
+                              {evento.descripcion ||
+                                evento.observacion ||
+                                "Sin descripción adicional."}
+                            </p>
+
+                            {obtenerFecha(evento) && (
+                              <p className={`mt-3 flex items-center gap-1.5 text-[11px] ${textoSecundario}`}>
+                                <CalendarDays size={13} />
+                                {fechaFormato(obtenerFecha(evento))}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <EstadoVacio
+                      icon={History}
+                      titulo="Sin historial registrado"
+                      descripcion="Aquí aparecerán los acontecimientos, revisiones y registros cronológicos del estudiante cuando existan datos disponibles."
+                    />
+                  )}
+                </div>
+
+                <Seccion
+                  titulo="Observaciones del módulo"
+                  descripcion="Anotaciones y comentarios de revisión registrados en el expediente"
+                  icon={MessageSquareText}
+                >
+                  <div className={`rounded-xl border p-4 ${subpanel}`}>
+                    <p className={`whitespace-pre-wrap text-sm leading-7 ${textoSecundario}`}>
+                      {observaciones ||
+                        "No existen observaciones registradas para este módulo."}
+                    </p>
+                  </div>
+                </Seccion>
+              </div>
+            )}
+
+            {seccionActiva === "documentos" && (
+              <div className="exp-entrada space-y-5">
+                <Seccion
+                  titulo="Documentación y evidencias del módulo"
+                  descripcion="Archivos, evidencias y calificaciones asociadas al expediente"
+                  icon={FolderOpen}
+                >
+                  {evidencias.length > 0 ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {evidencias.map((doc, i) => (
+                        <div
+                          key={doc.id ?? i}
+                          className={`flex items-center gap-3 rounded-xl border p-4 ${subpanel}`}
+                        >
+                          <IconoSeccion
+                            icon={FileText}
+                            color="blue"
+                          />
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-bold">
+                                {obtenerNombre(doc)}
+                              </p>
+                              {doc.nota !== null && doc.nota !== undefined && (
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                  Nota: {doc.nota}
+                                </span>
+                              )}
+                            </div>
+
+                            <p className={`mt-1 truncate text-[11px] ${textoSecundario}`}>
+                              {doc.archivo ||
+                                doc.nombre_archivo ||
+                                doc.descripcion ||
+                                "Archivo no adjuntado"}
+                            </p>
+
+                            {doc.fecha && (
+                              <p className="mt-1 text-[10px] text-blue-600">
+                                {fechaFormato(doc.fecha)}
+                              </p>
+                            )}
+                          </div>
+
+                          {doc.archivo_url && (
+                            <a
+                              href={doc.archivo_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100"
+                              title="Visualizar documento"
+                            >
+                              <Eye size={17} />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EstadoVacio
+                      icon={FileText}
+                      titulo="Sin documentos asociados"
+                      descripcion="No se encontraron evidencias o archivos registrados para este módulo."
+                    />
+                  )}
+                </Seccion>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      <div className={`flex flex-col justify-between gap-3 border-t pt-4 sm:flex-row sm:items-center ${darkMode ? "border-[#1e335c]" : "border-slate-200"}`}>
+        <div>
+          <p className="text-xs font-bold">
+            Expediente Integral del Estudiante
+          </p>
+
+          <p className={`mt-1 text-[10px] ${textoSecundario}`}>
+            Registro institucional de información académica EFSRT
+          </p>
+        </div>
+
+        <button
+          onClick={cargar}
+          disabled={cargando}
+          className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold transition hover:bg-slate-100 disabled:opacity-50"
+        >
+          <RefreshCw
+            size={14}
+            className={cargando ? "animate-spin" : ""}
+          />
+          Actualizar expediente
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PasoValidacion({ n, cumplido, titulo, detalle, subpanel, secundario }) {
+  return (
+    <div className={`flex items-center gap-3 rounded-xl border p-4 ${subpanel}`}>
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+          cumplido
+            ? "bg-emerald-500 text-white"
+            : "border-2 border-slate-300 text-slate-400"
+        }`}
+      >
+        {cumplido ? <CheckCircle2 size={17} /> : n}
+      </span>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-bold">{titulo}</p>
+        <p className={`truncate text-xs ${secundario}`}>{detalle}</p>
+      </div>
+    </div>
+  );
+}
+
+function EstadoVacio({ icon: Icon, titulo, descripcion }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 px-5 py-12 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+        <Icon size={23} />
+      </div>
+
+      <h4 className="mt-4 text-sm font-bold text-slate-700">
+        {titulo}
+      </h4>
+
+      <p className="mt-1 max-w-sm text-xs leading-6 text-slate-400">
+        {descripcion}
+      </p>
     </div>
   );
 }

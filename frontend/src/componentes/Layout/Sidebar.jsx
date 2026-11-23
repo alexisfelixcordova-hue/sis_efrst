@@ -16,18 +16,17 @@ import {
   ExternalLink,
   UserPlus,
   UserCheck,
-  Sparkles,
   FolderKanban,
   StickyNote,
   Folder,
   Contact,
   Calendar,
   FileCheck2,
+  CheckCircle2,
 } from "lucide-react";
 
 // Recibimos 'usuario' directamente como prop desde la BD (vía App.jsx)
 function Sidebar({ darkMode, vistaActual, onCambiarVista, onCerrarSesion, usuario }) {
-  
   // Normalizamos el id_rol que viene directamente de la base de datos
   const idRol = Number(usuario?.id_rol || 0);
 
@@ -54,15 +53,20 @@ function Sidebar({ darkMode, vistaActual, onCambiarVista, onCerrarSesion, usuari
   const menuDocentePrincipal = [
     { nombre: "Dashboard", icono: LayoutDashboard },
     { nombre: "Perfil", icono: User },
-    { nombre: "Mis Alumnos", icono: GraduationCap },          // Vinculado al flujo de Gestión y Visualización
-    { nombre: "Revisión de Expedientes", icono: FileCheck2 },    // Vinculado al flujo de Evaluación y Revisión
-    { nombre: "Evaluación de Evidencias", icono: ClipboardCheck },// Vinculado al flujo de Calificación y Carga de Evidencias
+    { nombre: "Mis Alumnos", icono: GraduationCap },
+    { nombre: "Revisión de Expedientes", icono: FileCheck2 },
+    { nombre: "Evaluación de Evidencias", icono: ClipboardCheck },
+    { nombre: "Calificar Estudiante", icono: CheckCircle2 },
     { nombre: "Empresas Asignadas", icono: Building2 },
     { nombre: "Reportes", icono: BarChart3 },
   ];
 
   // Selección estricta del menú según la BD
-  const menuPrincipal = esAdmin ? menuAdminPrincipal : menuDocentePrincipal;
+  const menuPrincipal = esAdmin
+    ? menuAdminPrincipal
+    : esDocente
+    ? menuDocentePrincipal
+    : menuDocentePrincipal;
 
   // SECCIÓN: GESTIÓN DE USUARIOS (Estrictamente Administrador)
   const menuUsuarios = [
@@ -105,20 +109,20 @@ function Sidebar({ darkMode, vistaActual, onCambiarVista, onCerrarSesion, usuari
     >
       {/* BRAND / LOGO */}
       <div className="flex items-center justify-between pb-1.5 pt-0.5 px-1 border-b border-gray-200/50 dark:border-gray-700/50 mb-1.5">
-  <div className="flex items-center gap-2">
-    <div className="w-11 h-11 shrink-0">
-      <img
-        src={logoInstituto}
-        alt="Logo INSTITUTO"
-        className="w-full h-full object-contain animate-pulse"
-      />
-    </div>
-    <span className="font-extrabold tracking-tight text-base truncate">
-      <span className={darkMode ? "text-blue-300" : "text-[#0b1b3a]"}>ANDRES</span>
-      <span className={darkMode ? "text-rose-400" : "text-[#7f1d1d]"}>ACD</span>
-    </span>
-  </div>
-</div>
+        <div className="flex items-center gap-2">
+          <div className="w-11 h-11 shrink-0">
+            <img
+              src={logoInstituto}
+              alt="Logo INSTITUTO"
+              className="w-full h-full object-contain animate-pulse"
+            />
+          </div>
+          <span className="font-extrabold tracking-tight text-base truncate">
+            <span className={darkMode ? "text-blue-300" : "text-[#0b1b3a]"}>ANDRES</span>
+            <span className={darkMode ? "text-rose-400" : "text-[#7f1d1d]"}>ACD</span>
+          </span>
+        </div>
+      </div>
 
       {/* MENÚ NAVEGABLE */}
       <nav className="flex-1 space-y-4 overflow-y-auto pr-1">
@@ -126,7 +130,9 @@ function Sidebar({ darkMode, vistaActual, onCambiarVista, onCerrarSesion, usuari
         <ul className="space-y-1">
           {menuPrincipal.map((item) => {
             const Icono = item.icono;
-            const isActive = vistaActual === item.nombre;
+            const isActive =
+              vistaActual === item.nombre ||
+              (item.nombre === "Calificar Estudiante" && vistaActual === "CalificarEstudiante");
 
             return (
               <li key={item.nombre}>

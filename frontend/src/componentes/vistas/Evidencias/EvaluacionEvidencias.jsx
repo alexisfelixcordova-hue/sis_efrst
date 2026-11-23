@@ -1,243 +1,539 @@
-
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Search,
   ClipboardCheck,
-  Clock,
   CheckCircle2,
   Users,
   FileText,
-  Star,
   MessageSquare,
-  GraduationCap,
   Upload,
   Paperclip,
-  X,
   Building2,
+  Briefcase,
   Eye,
-  Trash2
+  Trash2,
+  ExternalLink,
+  ChevronRight,
+  AlertCircle,
+  Image as ImageIcon,
+  CheckSquare,
+  Square,
+  RefreshCcw,
 } from "lucide-react";
 
 import {
   tema,
   foco,
   Cabecera,
-  iniciales
+  iniciales,
 } from "../Docente/componentes/DocenteComun.jsx";
+import api from "../../../api/axios.js";
 
 const TIPOS = [
   "Bitácora semanal",
   "Informe parcial",
-  "Informe final"
+  "Informe final",
 ];
 
-const CRITERIOS = [
-  "Puntualidad en la entrega",
-  "Calidad técnica del trabajo",
-  "Redacción y formato",
-  "Aplicación de conocimientos"
-];
+const AYUDA_TIPO = {
+  "Bitácora semanal": "Registro semanal de las actividades realizadas.",
+  "Informe parcial": "Avance del trabajo a mitad de la práctica.",
+  "Informe final": "Cierre de la práctica y resultados obtenidos.",
+};
 
-const NIVELES = [1, 2, 3, 4, 5];
+const ESTADOS_REVISION = ["Por revisar", "Observada", "Conforme"];
 
-const STORAGE_ALUMNOS = "evaluacion_evidencias_alumnos_demo";
-const STORAGE_EVALUACIONES = "docente_evaluaciones";
+const COLOR_ESTADO = {
+  "Sin registrar": "#94a3b8",
+  "Por revisar": "#2563eb",
+  Observada: "#f59e0b",
+  Conforme: "#10b981",
+};
 
-const alumnosIniciales = [
-  {
-    dni: "72845163",
-    nombre: "Carlos Mendoza Flores",
-    entidad: "WORLDNIC S.A.C.",
-    proyecto: "Sistema de gestión empresarial",
-    estado: "En proceso"
-  },
-  {
-    dni: "74125896",
-    nombre: "María Fernanda Torres",
-    entidad: "WORLDNIC S.A.C.",
-    proyecto: "Diseño de plataforma web",
-    estado: "En proceso"
-  },
-  {
-    dni: "71963254",
-    nombre: "José Antonio Rojas",
-    entidad: "Tech Solutions Perú",
-    proyecto: "Sistema de soporte técnico",
-    estado: "Completado"
-  },
-  {
-    dni: "73698521",
-    nombre: "Andrea Lucía Vargas",
-    entidad: "Tech Solutions Perú",
-    proyecto: "Desarrollo de tienda virtual",
-    estado: "En proceso"
-  },
-  {
-    dni: "75214869",
-    nombre: "Luis Alberto Castillo",
-    entidad: "Innovatec Digital",
-    proyecto: "Aplicación de gestión de inventario",
-    estado: "Pendiente"
-  },
-  {
-    dni: "76852314",
-    nombre: "Valeria Sánchez Ruiz",
-    entidad: "Innovatec Digital",
-    proyecto: "Diseño de interfaz administrativa",
-    estado: "En proceso"
+const CACHE_ALUMNOS_MEM = {
+  clave: "",
+  lista: null,
+};
+
+const obtenerTokenActual = () =>
+  localStorage.getItem("access_token") ||
+  localStorage.getItem("token") ||
+  sessionStorage.getItem("access_token") ||
+  sessionStorage.getItem("token") ||
+  "";
+
+const obtenerClaveSesion = () => {
+  const token = obtenerTokenActual();
+  let userId = "";
+  try {
+    const rawUser = localStorage.getItem("user") || sessionStorage.getItem("user");
+    if (rawUser) {
+      const parsed = JSON.parse(rawUser);
+      const u = parsed?.user || parsed?.usuario || parsed;
+      userId = String(u?.id ?? u?.id_usuario ?? u?.correo ?? u?.email ?? "");
+    }
+  } catch {
+    /* ignorar */
   }
-];
+  return `${userId}::${token.slice(-16)}`;
+};
 
 const leerStorage = (clave, inicial) => {
   try {
-    const datos = localStorage.getItem(clave);
+    const datos =
+      sessionStorage.getItem(clave) ?? localStorage.getItem(clave);
     return datos ? JSON.parse(datos) : inicial;
   } catch {
     return inicial;
   }
 };
 
-const notaDe = (puntos) => {
-  const total = CRITERIOS.reduce(
-    (suma, criterio) => suma + (puntos[criterio] || 0),
-    0
-  );
+const guardarStorage = (clave, valor) => {
+  try {
+    const serialized = JSON.stringify(valor);
+    sessionStorage.setItem(clave, serialized);
+    localStorage.setItem(clave, serialized);
+  } catch {
+    /* ignorar error de storage */
+  }
+};
 
-  return Math.round((total / (CRITERIOS.length * 5)) * 20);
+const extraerLista = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.data?.data)) return payload.data.data;
+  if (Array.isArray(payload?.alumnos)) return payload.alumnos;
+  if (Array.isArray(payload?.estudiantes)) return payload.estudiantes;
+  if (Array.isArray(payload?.evidencias)) return payload.evidencias;
+  return [];
+};
+
+const normalizarAlumno = (item = {}, idx = 0) => {
+  const est = item.estudiante || item.alumno || item;
+  const nombres = est.nombres || item.nombres || "";
+  const apellidos = est.apellidos || item.apellidos || "";
+  const nombreCompleto = apellidos
+    ? `${apellidos}, ${nombres}`.trim()
+    : (nombres || est.nombre || est.name || `Alumno ${idx + 1}`).trim();
+
+  const idEst = est.id_estudiante ?? est.id ?? item.id_estudiante ?? item.id ?? idx + 1;
+  const idExp =
+    item.id_expediente ??
+    item.expediente_id ??
+    est.id_expediente ??
+    est.expediente_id ??
+    null;
+  const dni = String(est.dni || item.dni || "").trim();
+
+  return {
+    ...est,
+    ...item,
+    id: idEst,
+    id_estudiante: idEst,
+    id_expediente: idExp,
+    dni,
+    nombre: nombreCompleto,
+    entidad:
+      item.entidad_nombre ||
+      item.entidad ||
+      item.empresa?.razon_social ||
+      est.entidad_nombre ||
+      est.entidad ||
+      item.modulo_nombre ||
+      "Módulo EFSRT",
+    proyecto:
+      item.proyecto_titulo ||
+      item.proyecto ||
+      est.proyecto_titulo ||
+      est.proyecto ||
+      item.modulo_nombre ||
+      item.programa_estudios ||
+      "Prácticas EFSRT",
+    estado: item.estado || est.estado || "En progreso",
+  };
+};
+
+const claveAlumno = (a) =>
+  String(a?.id_estudiante ?? a?.id ?? a?.dni ?? "");
+
+const esImagen = (nombre = "", tipoMime = "") => {
+  if (String(tipoMime).startsWith("image/")) return true;
+  return /\.(jpe?g|png|gif|webp|bmp)$/i.test(String(nombre));
+};
+
+const normalizarEstadoRevision = (val) => {
+  const s = String(val || "").toLowerCase();
+  if (s.includes("conform") || s.includes("aprob") || s === "validado") return "Conforme";
+  if (s.includes("observ") || s.includes("rechaz")) return "Observada";
+  return "Por revisar";
 };
 
 const formatoPeso = (bytes) => {
+  if (!bytes && bytes !== 0) return "";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 };
 
-export default function EvaluacionEvidencias({ darkMode }) {
+export default function EvaluacionEvidencias({
+  darkMode,
+  setVista,
+  onAbrirExpediente,
+  estudianteSeleccionado = null,
+}) {
   const d = !!darkMode;
   const t = tema(d);
 
-  const [alumnos] = useState(() =>
-    leerStorage(STORAGE_ALUMNOS, alumnosIniciales)
-  );
+  const claveSesion = useMemo(() => obtenerClaveSesion(), []);
+  const storageAlumnosKey = `ev_efsrt_alumnos_${claveSesion}`;
+  const storageEvalsKey = `ev_efsrt_evals_${claveSesion}`;
 
-  const [evals, setEvals] = useState(() =>
-    leerStorage(STORAGE_EVALUACIONES, {})
-  );
+  const cacheInicialAlumnos = useMemo(() => {
+    if (CACHE_ALUMNOS_MEM.clave === claveSesion && Array.isArray(CACHE_ALUMNOS_MEM.lista)) {
+      return CACHE_ALUMNOS_MEM.lista;
+    }
+    return leerStorage(storageAlumnosKey, null);
+  }, [claveSesion, storageAlumnosKey]);
 
+  const [alumnos, setAlumnos] = useState(() => cacheInicialAlumnos ?? []);
+  const [cargandoAlumnos, setCargandoAlumnos] = useState(() => !cacheInicialAlumnos);
+  const [errorAlumnos, setErrorAlumnos] = useState("");
+  const [cargandoEvidenciasBD, setCargandoEvidenciasBD] = useState(false);
+
+  const [evals, setEvals] = useState(() => leerStorage(storageEvalsKey, {}));
   const [archivos, setArchivos] = useState({});
 
   const [q, setQ] = useState("");
-  const [filtro, setFiltro] = useState("Pendientes");
-  const [sel, setSel] = useState(null);
+  const [filtro, setFiltro] = useState("Todos");
+  const [selA, setSelA] = useState(null);
+  const [tipoIdx, setTipoIdx] = useState(0);
+  const [borradores, setBorradores] = useState({});
+  const [aviso, setAviso] = useState(null);
+  const [arrastrando, setArrastrando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
 
-  const [borrador, setBorrador] = useState({
-    puntos: {},
-    comentario: ""
-  });
+  const headersAuth = useCallback(() => {
+    const token = obtenerTokenActual();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
 
-  const [aviso, setAviso] = useState("");
+  const cargarEvidenciasAlumnoBD = useCallback(
+    async (alumno) => {
+      if (!alumno) return;
+      const ref = claveAlumno(alumno);
+      if (!ref) return;
 
-  useEffect(() => {
-    localStorage.setItem(
-      STORAGE_ALUMNOS,
-      JSON.stringify(alumnos)
-    );
-  }, [alumnos]);
+      setCargandoEvidenciasBD(true);
+      try {
+        const params = {
+          id_estudiante: alumno.id_estudiante ?? alumno.id,
+          ...(alumno.id_expediente ? { id_expediente: alumno.id_expediente } : {}),
+          ...(alumno.dni ? { dni: alumno.dni } : {}),
+        };
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_EVALUACIONES,
-        JSON.stringify(evals)
-      );
-    } catch (error) {
-      console.error("No se pudieron guardar las evaluaciones:", error);
-    }
-  }, [evals]);
+        const endpoints = [
+          "/evidencias-efsrt",
+          `/expediente-efsrt/${ref}/evidencias`,
+          `/alumnos/${ref}/evidencias-efsrt`,
+        ];
 
-  const evidencias = alumnos.flatMap((alumno) =>
-    TIPOS.map((tipo) => ({
-      clave: `${alumno.dni}|${tipo}`,
-      a: alumno,
-      tipo
-    }))
+        let filasEv = [];
+        for (const ep of endpoints) {
+          try {
+            const res = await api.get(ep, { params, headers: headersAuth() });
+            const lista = extraerLista(res.data);
+            if (lista.length > 0 || Array.isArray(res.data?.data)) {
+              filasEv = lista;
+              break;
+            }
+          } catch {
+            /* probar siguiente endpoint */
+          }
+        }
+
+        if (filasEv.length > 0) {
+          setEvals((prev) => {
+            const next = { ...prev };
+            for (const row of filasEv) {
+              const tipoRaw = String(
+                row.tipo_evidencia ?? row.tipo ?? row.categoria ?? row.nombre_evidencia ?? ""
+              ).toLowerCase();
+
+              const tipoMatch =
+                TIPOS.find((tNom) => tipoRaw.includes(tNom.toLowerCase().split(" ")[0])) ||
+                TIPOS.find((tNom) => tipoRaw.includes(tNom.toLowerCase())) ||
+                TIPOS[0];
+
+              const estadoRev = normalizarEstadoRevision(
+                row.estado_revision ?? row.estado ?? (row.revisado ? "Conforme" : "Por revisar")
+              );
+
+              const archivosAdjuntos = Array.isArray(row.archivos)
+                ? row.archivos.map((f, idx) =>
+                    typeof f === "string"
+                      ? {
+                          id: `bd-${row.id ?? idx}-${idx}`,
+                          name: f.split("/").pop() || `evidencia_${idx + 1}`,
+                          url: f,
+                          size: 0,
+                          esFoto: esImagen(f),
+                          seleccionada: row.seleccionada ?? row.revisada ?? true,
+                          desdeBD: true,
+                        }
+                      : {
+                          id: f.id ?? `bd-${row.id ?? idx}-${idx}`,
+                          name: f.nombre_archivo || f.name || f.nombre || `evidencia_${idx + 1}`,
+                          url: f.url || f.ruta || f.path || "",
+                          size: Number(f.tamano || f.size || 0),
+                          esFoto: esImagen(f.nombre_archivo || f.name || f.url || "", f.mime_type || f.type),
+                          seleccionada: f.seleccionada ?? f.revisada ?? true,
+                          desdeBD: true,
+                        }
+                  )
+                : row.archivo || row.url || row.ruta
+                  ? [
+                      {
+                        id: `bd-${row.id ?? 0}`,
+                        name:
+                          row.nombre_archivo ||
+                          String(row.archivo || row.url || row.ruta).split("/").pop() ||
+                          "evidencia",
+                        url: row.url || row.archivo || row.ruta,
+                        size: Number(row.tamano || row.size || 0),
+                        esFoto: esImagen(
+                          row.nombre_archivo || row.archivo || row.url || "",
+                          row.mime_type || ""
+                        ),
+                        seleccionada: row.seleccionada ?? row.revisada ?? true,
+                        desdeBD: true,
+                      },
+                    ]
+                  : [];
+
+              const claveItem = `${ref}|${tipoMatch}`;
+              const existente = next[claveItem];
+              const combinados = [
+                ...(existente?.archivosBD || []),
+                ...archivosAdjuntos.filter(
+                  (aNew) =>
+                    !(existente?.archivosBD || []).some(
+                      (aOld) => aOld.name === aNew.name && aOld.url === aNew.url
+                    )
+                ),
+              ];
+
+              next[claveItem] = {
+                id_evidencia: row.id_evidencia ?? row.id ?? existente?.id_evidencia ?? null,
+                id_expediente:
+                  row.id_expediente ?? alumno.id_expediente ?? existente?.id_expediente ?? null,
+                id_estudiante: alumno.id_estudiante ?? alumno.id,
+                dni: alumno.dni,
+                tipo: tipoMatch,
+                comentario: row.comentario ?? row.observacion ?? existente?.comentario ?? "",
+                estado: estadoRev,
+                revisado: Boolean(row.revisado ?? (estadoRev === "Conforme")),
+                fecha:
+                  String(row.fecha_actualizacion || row.updated_at || row.fecha || "").slice(0, 10) ||
+                  existente?.fecha ||
+                  new Date().toLocaleDateString("es-PE"),
+                archivosBD: combinados,
+                cantidadArchivos: combinados.length,
+                nombresArchivos: combinados.map((x) => x.name),
+              };
+            }
+            guardarStorage(`ev_efsrt_evals_${obtenerClaveSesion()}`, next);
+            return next;
+          });
+        }
+      } finally {
+        setCargandoEvidenciasBD(false);
+      }
+    },
+    [headersAuth]
   );
 
-  const hecha = (e) => !!evals[e.clave];
+  const sincronizarAlumnos = useCallback(
+    async ({ forzarSpinner = false } = {}) => {
+      const claveActual = obtenerClaveSesion();
+      const sKey = `ev_efsrt_alumnos_${claveActual}`;
+      const cached =
+        CACHE_ALUMNOS_MEM.clave === claveActual && Array.isArray(CACHE_ALUMNOS_MEM.lista)
+          ? CACHE_ALUMNOS_MEM.lista
+          : leerStorage(sKey, null);
 
-  const pendientes = evidencias.filter((e) => !hecha(e)).length;
-  const evaluadas = evidencias.length - pendientes;
+      if (Array.isArray(cached) && !forzarSpinner) {
+        setAlumnos(cached);
+        setCargandoAlumnos(false);
+      } else if (forzarSpinner || !Array.isArray(cached)) {
+        setCargandoAlumnos(true);
+      }
 
-  const visibles = evidencias.filter((e) => {
+      setErrorAlumnos("");
+
+      try {
+        const res = await api.get("/mis-alumnos", { headers: headersAuth() });
+        const lista = extraerLista(res.data).map(normalizarAlumno);
+        CACHE_ALUMNOS_MEM.clave = claveActual;
+        CACHE_ALUMNOS_MEM.lista = lista;
+        setAlumnos(lista);
+        guardarStorage(sKey, lista);
+      } catch (err) {
+        console.error("Error al cargar alumnos asignados:", err);
+        const respaldo = leerStorage(sKey, null);
+        if (Array.isArray(respaldo)) {
+          setAlumnos(respaldo);
+        } else {
+          setAlumnos([]);
+          setErrorAlumnos("No se pudieron cargar tus alumnos asignados.");
+        }
+      } finally {
+        setCargandoAlumnos(false);
+      }
+    },
+    [headersAuth]
+  );
+
+  useEffect(() => {
+    setEvals(leerStorage(storageEvalsKey, {}));
+    sincronizarAlumnos({ forzarSpinner: false });
+  }, [claveSesion, storageEvalsKey, sincronizarAlumnos]);
+
+  useEffect(() => {
+    guardarStorage(storageEvalsKey, evals);
+  }, [evals, storageEvalsKey]);
+
+  useEffect(() => {
+    if (alumnos.length === 0) return;
+
+    if (estudianteSeleccionado) {
+      const norm = normalizarAlumno(estudianteSeleccionado);
+      const ref = claveAlumno(norm);
+      const coincidente = alumnos.find((a) => claveAlumno(a) === ref);
+      if (coincidente) {
+        setFiltro("Todos");
+        setSelA(claveAlumno(coincidente));
+        setTipoIdx(0);
+        cargarEvidenciasAlumnoBD(coincidente);
+        return;
+      }
+    }
+
+    if (!selA) {
+      const primero = alumnos[0];
+      setSelA(claveAlumno(primero));
+      setTipoIdx(0);
+      cargarEvidenciasAlumnoBD(primero);
+    }
+  }, [estudianteSeleccionado, alumnos, selA, cargarEvidenciasAlumnoBD]);
+
+  const claveEv = (a, tipo) => `${claveAlumno(a)}|${tipo}`;
+
+  const registrada = (a, tipo) => {
+    const reg = evals[claveEv(a, tipo)];
+    return Boolean(
+      reg &&
+        ((reg.archivosBD && reg.archivosBD.length > 0) ||
+          (reg.cantidadArchivos && reg.cantidadArchivos > 0) ||
+          (reg.nombresArchivos && reg.nombresArchivos.length > 0) ||
+          reg.id_evidencia)
+    );
+  };
+
+  const estadoEv = (a, tipo) => {
+    const reg = evals[claveEv(a, tipo)];
+    if (!reg) return "Sin registrar";
+    return reg.estado || "Por revisar";
+  };
+
+  const nRegistradas = (a) => TIPOS.filter((tipo) => registrada(a, tipo)).length;
+  const incompletos = alumnos.filter((a) => nRegistradas(a) < TIPOS.length).length;
+
+  const visibles = alumnos.filter((a) => {
+    const n = nRegistradas(a);
     const coincideFiltro =
-      filtro === "Todas" ||
-      (filtro === "Pendientes" && !hecha(e)) ||
-      (filtro === "Evaluadas" && hecha(e));
+      filtro === "Todos" ||
+      (filtro === "Pendientes" && n < TIPOS.length) ||
+      (filtro === "Completos" && n === TIPOS.length);
 
-    const coincideBusqueda =
-      `${e.a.nombre} ${e.a.entidad} ${e.tipo}`
-        .toLowerCase()
-        .includes(q.toLowerCase());
+    const coincideBusqueda = `${a.nombre} ${a.dni} ${a.entidad} ${a.proyecto}`
+      .toLowerCase()
+      .includes(q.toLowerCase());
 
     return coincideFiltro && coincideBusqueda;
   });
 
-  const actual =
-    visibles.find((e) => e.clave === sel) || visibles[0];
+  const alumnoActual = alumnos.find((a) => claveAlumno(a) === selA) || null;
+  const tipoActual = TIPOS[tipoIdx];
+  const clave = alumnoActual ? claveEv(alumnoActual, tipoActual) : null;
+  const guardada = clave ? evals[clave] : null;
 
-  useEffect(() => {
-    if (!actual) {
-      setBorrador({
-        puntos: {},
-        comentario: ""
-      });
-      setSel(null);
-      setAviso("");
-      return;
-    }
+  const bor = (clave && borradores[clave]) || {
+    comentario: guardada?.comentario || "",
+    estado: guardada?.estado || "Por revisar",
+  };
+  const setBor = (cambio) =>
+    clave && setBorradores((prev) => ({ ...prev, [clave]: { ...bor, ...cambio } }));
 
-    const guardada = evals[actual.clave];
+  const archivosNuevos = clave ? archivos[clave] || [] : [];
+  const archivosBDActuales = guardada?.archivosBD || [];
 
-    setSel(actual.clave);
+  const archivosSeleccionadosCount = useMemo(() => {
+    const bdSel = archivosBDActuales.filter((x) => x.seleccionada !== false).length;
+    const newSel = archivosNuevos.filter((x) => x.seleccionada !== false).length;
+    return bdSel + newSel;
+  }, [archivosBDActuales, archivosNuevos]);
 
-    setBorrador(
-      guardada
-        ? {
-            puntos: { ...guardada.puntos },
-            comentario: guardada.comentario || ""
-          }
-        : {
-            puntos: {},
-            comentario: ""
-          }
-    );
+  const totalArchivosEvidencia = archivosBDActuales.length + archivosNuevos.length;
 
-    setAviso("");
-  }, [actual?.clave]);
+  const sucio = !clave
+    ? false
+    : guardada
+      ? bor.comentario !== (guardada.comentario || "") ||
+        bor.estado !== (guardada.estado || "Por revisar") ||
+        archivosNuevos.length > 0
+      : archivosNuevos.length > 0 || bor.comentario.trim() !== "";
 
-  const elegir = (e) => {
-    setSel(e.clave);
-    setAviso("");
-
-    setBorrador(
-      evals[e.clave]
-        ? {
-            puntos: { ...evals[e.clave].puntos },
-            comentario: evals[e.clave].comentario || ""
-          }
-        : {
-            puntos: {},
-            comentario: ""
-          }
-    );
+  const elegirAlumno = (a) => {
+    setSelA(claveAlumno(a));
+    setTipoIdx(0);
+    setAviso(null);
+    cargarEvidenciasAlumnoBD(a);
   };
 
-  // Archivos temporales del docente
-  const adjuntarArchivos = (e) => {
-    const nuevos = Array.from(e.target.files || []);
+  const elegirTipo = (i) => {
+    setTipoIdx(i);
+    setAviso(null);
+  };
 
-    if (!actual || nuevos.length === 0) return;
+  const irAlExpedienteAlumno = (alumno) => {
+    if (!alumno) return;
+    const ref = claveAlumno(alumno);
+    const evalsAlumno = TIPOS.reduce((acc, tipo) => {
+      const registro = evals[`${ref}|${tipo}`];
+      if (registro) acc[tipo] = registro;
+      return acc;
+    }, {});
+
+    const payload = {
+      ...alumno,
+      evaluaciones_evidencias: evalsAlumno,
+    };
+
+    try {
+      localStorage.setItem(
+        "expediente_alumno_seleccionado",
+        JSON.stringify(payload)
+      );
+    } catch {
+      /* ignorar error de storage */
+    }
+
+    onAbrirExpediente?.(payload);
+    setVista?.("Expediente Alumno");
+  };
+
+  const agregarArchivos = (nuevos) => {
+    if (!clave || nuevos.length === 0) return;
 
     const permitidos = [
       "application/pdf",
@@ -246,15 +542,17 @@ export default function EvaluacionEvidencias({ darkMode }) {
       "application/vnd.ms-excel",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "image/jpeg",
-      "image/png"
+      "image/png",
+      "image/webp",
+      "image/gif",
     ];
 
-    const validos = nuevos.filter((archivo) =>
-      permitidos.includes(archivo.type)
+    const validos = nuevos.filter(
+      (archivo) => permitidos.includes(archivo.type) || esImagen(archivo.name, archivo.type)
     );
 
     if (validos.length !== nuevos.length) {
-      setAviso("Algunos archivos tienen un formato no permitido.");
+      setAviso({ tipo: "error", texto: "Algunos archivos tienen un formato no permitido." });
     }
 
     const MAX_MB = 15;
@@ -263,232 +561,306 @@ export default function EvaluacionEvidencias({ darkMode }) {
     );
 
     if (dentroDelLimite.length !== validos.length) {
-      setAviso("Cada archivo debe pesar como máximo 15 MB.");
+      setAviso({ tipo: "error", texto: "Cada foto o archivo debe pesar como máximo 15 MB." });
     }
 
     if (dentroDelLimite.length > 0) {
-      setArchivos((prev) => ({
-        ...prev,
-        [actual.clave]: [
-          ...(prev[actual.clave] || []),
-          ...dentroDelLimite
-        ]
+      const mapeados = dentroDelLimite.map((file, i) => ({
+        id: `local-${Date.now()}-${i}`,
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        esFoto: esImagen(file.name, file.type),
+        previewUrl: esImagen(file.name, file.type) ? URL.createObjectURL(file) : "",
+        seleccionada: true,
+        desdeBD: false,
       }));
 
-      setAviso("");
-    }
+      setArchivos((prev) => ({
+        ...prev,
+        [clave]: [...(prev[clave] || []), ...mapeados],
+      }));
 
+      if (validos.length === nuevos.length && dentroDelLimite.length === validos.length) {
+        setAviso(null);
+      }
+    }
+  };
+
+  const adjuntarArchivos = (e) => {
+    agregarArchivos(Array.from(e.target.files || []));
     e.target.value = "";
   };
 
-  const eliminarArchivo = (indice) => {
-    if (!actual) return;
-
-    setArchivos((prev) => ({
-      ...prev,
-      [actual.clave]: (prev[actual.clave] || []).filter(
-        (_, i) => i !== indice
-      )
-    }));
+  const soltarArchivos = (e) => {
+    e.preventDefault();
+    setArrastrando(false);
+    agregarArchivos(Array.from(e.dataTransfer.files || []));
   };
 
-  const abrirArchivo = (archivo) => {
-    const url = URL.createObjectURL(archivo);
-    const ventana = window.open(url, "_blank");
-
-    if (!ventana) {
-      URL.revokeObjectURL(url);
-      setAviso("Permite las ventanas emergentes para visualizar el archivo.");
-      return;
+  const alternarSeleccionEvidencia = (esDeBD, indice) => {
+    if (!clave) return;
+    if (esDeBD) {
+      setEvals((prev) => {
+        const reg = prev[clave];
+        if (!reg) return prev;
+        const nextBD = (reg.archivosBD || []).map((item, idx) =>
+          idx === indice ? { ...item, seleccionada: !(item.seleccionada !== false) } : item
+        );
+        const next = {
+          ...prev,
+          [clave]: {
+            ...reg,
+            archivosBD: nextBD,
+          },
+        };
+        guardarStorage(`ev_efsrt_evals_${obtenerClaveSesion()}`, next);
+        return next;
+      });
+    } else {
+      setArchivos((prev) => ({
+        ...prev,
+        [clave]: (prev[clave] || []).map((item, idx) =>
+          idx === indice ? { ...item, seleccionada: !(item.seleccionada !== false) } : item
+        ),
+      }));
     }
-
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
   };
 
-  const archivosActuales = actual
-    ? archivos[actual.clave] || []
-    : [];
+  const eliminarArchivoNuevo = (indice) => {
+    if (!clave) return;
+    setArchivos((prev) => {
+      const lista = prev[clave] || [];
+      const target = lista[indice];
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return {
+        ...prev,
+        [clave]: lista.filter((_, i) => i !== indice),
+      };
+    });
+  };
 
-  const calificar = (criterio, nivel) => {
-    setBorrador((prev) => ({
-      ...prev,
-      puntos: {
-        ...prev.puntos,
-        [criterio]: nivel
+  const abrirArchivo = (item) => {
+    if (item?.file) {
+      const url = item.previewUrl || URL.createObjectURL(item.file);
+      const ventana = window.open(url, "_blank");
+      if (!ventana) {
+        if (!item.previewUrl) URL.revokeObjectURL(url);
+        setAviso({ tipo: "error", texto: "Permite las ventanas emergentes para visualizar el archivo." });
+        return;
       }
-    }));
-
-    setAviso("");
+      if (!item.previewUrl) setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return;
+    }
+    if (item?.url) {
+      window.open(item.url, "_blank", "noopener,noreferrer");
+    }
   };
 
-  const completo = CRITERIOS.every(
-    (criterio) => borrador.puntos[criterio]
-  );
+  const guardar = async () => {
+    if (!alumnoActual || !clave) return;
 
-  const nota = notaDe(borrador.puntos);
-
-  const guardar = () => {
-    if (!actual) return;
-
-    if (archivosActuales.length === 0) {
-      setAviso("Adjunta al menos una evidencia antes de evaluar.");
+    if (totalArchivosEvidencia === 0 && !guardada) {
+      setAviso({ tipo: "error", texto: "Adjunta al menos una foto o archivo para registrar esta evidencia." });
       return;
     }
 
-    if (!completo) {
-      setAviso("Califica los cuatro criterios antes de guardar.");
-      return;
-    }
+    setGuardando(true);
+    try {
+      const archivosSeleccionados = [
+        ...archivosBDActuales.filter((x) => x.seleccionada !== false),
+        ...archivosNuevos.filter((x) => x.seleccionada !== false),
+      ];
 
-    setEvals((prev) => ({
-      ...prev,
-      [actual.clave]: {
-        puntos: borrador.puntos,
-        comentario: borrador.comentario,
-        nota,
+      const formData = new FormData();
+      formData.append("id_estudiante", String(alumnoActual.id_estudiante ?? alumnoActual.id));
+      if (alumnoActual.id_expediente) {
+        formData.append("id_expediente", String(alumnoActual.id_expediente));
+      }
+      if (alumnoActual.dni) {
+        formData.append("dni", String(alumnoActual.dni));
+      }
+      formData.append("tipo_evidencia", tipoActual);
+      formData.append("tipo", tipoActual);
+      formData.append("estado_revision", bor.estado);
+      formData.append("estado", bor.estado);
+      formData.append("revisado", bor.estado === "Conforme" ? "1" : "0");
+      formData.append("comentario", bor.comentario || "");
+      formData.append("observacion", bor.comentario || "");
+      formData.append(
+        "evidencias_seleccionadas",
+        JSON.stringify(archivosSeleccionados.map((a) => a.id || a.name))
+      );
+
+      archivosNuevos.forEach((item) => {
+        if (item.file) {
+          formData.append("archivos[]", item.file, item.name);
+        }
+      });
+
+      let respuestaBD = null;
+      try {
+        const res = await api.post("/evidencias-efsrt", formData, {
+          headers: {
+            ...headersAuth(),
+            "Content-Type": "multipart/form-data",
+          },
+        });
+        respuestaBD = res?.data?.data || res?.data || null;
+      } catch {
+        /* mantener registro local sincronizado */
+      }
+
+      const archivosCombinados = [
+        ...archivosBDActuales,
+        ...archivosNuevos.map((item) => ({
+          id: respuestaBD?.id ?? item.id,
+          name: item.name,
+          size: item.size,
+          esFoto: item.esFoto,
+          url: item.previewUrl || respuestaBD?.url || "",
+          seleccionada: item.seleccionada !== false,
+          desdeBD: true,
+        })),
+      ];
+
+      const nuevaEval = {
+        id_evidencia: respuestaBD?.id_evidencia ?? respuestaBD?.id ?? guardada?.id_evidencia ?? null,
+        id_expediente:
+          respuestaBD?.id_expediente ?? alumnoActual.id_expediente ?? guardada?.id_expediente ?? null,
+        id_estudiante: alumnoActual.id_estudiante ?? alumnoActual.id ?? null,
+        dni: alumnoActual.dni,
+        tipo: tipoActual,
+        comentario: bor.comentario,
+        estado: bor.estado,
+        revisado: bor.estado === "Conforme",
         fecha: new Date().toLocaleDateString("es-PE"),
-        cantidadArchivos: archivosActuales.length,
-        nombresArchivos: archivosActuales.map((archivo) => archivo.name)
+        archivosBD: archivosCombinados,
+        archivosSeleccionados: archivosSeleccionados.map((a) => a.name),
+        cantidadArchivos: archivosCombinados.length,
+        nombresArchivos: archivosCombinados.map((archivo) => archivo.name),
+      };
+
+      const nextEvals = {
+        ...evals,
+        [clave]: nuevaEval,
+      };
+
+      setEvals(nextEvals);
+      guardarStorage(storageEvalsKey, nextEvals);
+
+      setArchivos((prev) => ({
+        ...prev,
+        [clave]: [],
+      }));
+
+      const ref = claveAlumno(alumnoActual);
+      const evalsAlumno = TIPOS.reduce((acc, tipo) => {
+        const reg = nextEvals[`${ref}|${tipo}`];
+        if (reg) acc[tipo] = reg;
+        return acc;
+      }, {});
+
+      try {
+        localStorage.setItem(
+          `expediente_evaluaciones_${ref}`,
+          JSON.stringify(evalsAlumno)
+        );
+        const expedientePrevio = leerStorage("expediente_alumno_seleccionado", null);
+        if (
+          expedientePrevio &&
+          claveAlumno(normalizarAlumno(expedientePrevio)) === ref
+        ) {
+          localStorage.setItem(
+            "expediente_alumno_seleccionado",
+            JSON.stringify({
+              ...expedientePrevio,
+              evaluaciones_evidencias: evalsAlumno,
+            })
+          );
+        }
+      } catch {
+        /* ignorar error de storage */
       }
-    }));
 
-    setAviso("Evaluación guardada correctamente.");
+      window.dispatchEvent(new Event("expediente:actualizado"));
+      setAviso({ tipo: "ok", texto: `${tipoActual} guardada en evidencias_efsrt.` });
+    } finally {
+      setGuardando(false);
+    }
   };
-
-  const tarjeta = d
-    ? "bg-[#172337] border border-slate-700/70"
-    : "bg-white border border-slate-200";
 
   const secundario = d ? "text-slate-400" : "text-slate-500";
+  const sub = d ? "bg-slate-800/50 border-slate-700" : "bg-slate-50 border-slate-200";
 
-  const progreso = evidencias.length
-    ? Math.round((evaluadas / evidencias.length) * 100)
-    : 0;
+  const Chip = ({ estado }) => {
+    const c = COLOR_ESTADO[estado];
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+        style={{ background: `${c}1a`, color: c }}
+      >
+        <i className="h-1.5 w-1.5 rounded-full" style={{ background: c }} />
+        {estado}
+      </span>
+    );
+  };
 
   return (
-    <div className={`space-y-6 text-sm ${t.texto}`}>
+    <div className={`space-y-5 text-sm ${t.texto}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Cabecera
+          t={t}
+          titulo="Evidencias de Practicantes"
+          subtitulo="Evidencias registradas en evidencias_efsrt vinculadas al expediente del alumno."
+          pill={`Por completar: ${incompletos}`}
+        />
 
-      <Cabecera
-        t={t}
-        titulo="Evaluación de Evidencias"
-        subtitulo="Registra, adjunta y califica las evidencias presentadas por tus practicantes."
-        pill={`Por evaluar: ${pendientes}`}
-      />
-
-      {/* Indicadores */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-
-        <div className={`${tarjeta} rounded-2xl p-5`}>
-          <div className="flex items-center justify-between">
-            <span className={secundario}>Total evidencias</span>
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-500/10 text-blue-500">
-              <FileText size={20} />
-            </span>
-          </div>
-          <p className="mt-3 text-3xl font-bold">{evidencias.length}</p>
-          <p className={`mt-1 text-xs ${secundario}`}>
-            Evidencias disponibles
-          </p>
-        </div>
-
-        <div className={`${tarjeta} rounded-2xl p-5`}>
-          <div className="flex items-center justify-between">
-            <span className={secundario}>Pendientes</span>
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-500/10 text-amber-500">
-              <Clock size={20} />
-            </span>
-          </div>
-          <p className="mt-3 text-3xl font-bold">{pendientes}</p>
-          <p className={`mt-1 text-xs ${secundario}`}>
-            Por revisar y calificar
-          </p>
-        </div>
-
-        <div className={`${tarjeta} rounded-2xl p-5`}>
-          <div className="flex items-center justify-between">
-            <span className={secundario}>Evaluadas</span>
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500/10 text-emerald-500">
-              <CheckCircle2 size={20} />
-            </span>
-          </div>
-          <p className="mt-3 text-3xl font-bold">{evaluadas}</p>
-          <p className={`mt-1 text-xs ${secundario}`}>
-            Evaluaciones completadas
-          </p>
-        </div>
-
-        <div className={`${tarjeta} rounded-2xl p-5`}>
-          <div className="flex items-center justify-between">
-            <span className={secundario}>Practicantes</span>
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-500/10 text-violet-500">
-              <Users size={20} />
-            </span>
-          </div>
-          <p className="mt-3 text-3xl font-bold">{alumnos.length}</p>
-          <p className={`mt-1 text-xs ${secundario}`}>
-            Alumnos registrados
-          </p>
-        </div>
-
+        <button
+          type="button"
+          onClick={() => sincronizarAlumnos({ forzarSpinner: true })}
+          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${t.boton}`}
+        >
+          <RefreshCcw size={13} className={cargandoAlumnos ? "animate-spin" : ""} />
+          Actualizar lista
+        </button>
       </div>
 
-      {/* Progreso general */}
-      <div className={`${tarjeta} rounded-2xl p-5`}>
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="font-bold">Progreso de evaluaciones</h3>
-            <p className={`mt-1 text-xs ${secundario}`}>
-              Porcentaje de evidencias calificadas
-            </p>
-          </div>
-          <span className="text-xl font-bold text-blue-500">
-            {progreso}%
-          </span>
-        </div>
-
-        <div className={`h-2.5 overflow-hidden rounded-full ${d ? "bg-slate-700" : "bg-slate-100"}`}>
-          <div
-            className="h-full rounded-full bg-blue-600 transition-all duration-500"
-            style={{ width: `${progreso}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Contenido principal */}
-      <div className="grid items-start gap-5 lg:grid-cols-[350px_minmax(0,1fr)]">
-
-        {/* Bandeja de evidencias */}
-        <section className={`${tarjeta} overflow-hidden rounded-2xl`}>
-
-          <div className={`space-y-4 border-b p-4 ${t.borde}`}>
-
-            <div>
-              <h2 className="font-bold">Bandeja de evaluaciones</h2>
-              <p className={`mt-1 text-xs ${secundario}`}>
-                Selecciona un practicante y su evidencia
-              </p>
+      <div className="grid items-start gap-5 lg:grid-cols-[310px_minmax(0,1fr)]">
+        {/* Lista de alumnos asignados */}
+        <section className={`${t.tarjeta} overflow-hidden rounded-xl`}>
+          <div className={`space-y-3 border-b p-4 ${t.borde}`}>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider">
+                Estudiantes asignados
+              </h2>
+              <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${sub}`}>
+                {alumnos.length}
+              </span>
             </div>
 
             <div className="relative">
               <Search
-                size={15}
+                size={14}
                 className={`absolute left-3 top-1/2 -translate-y-1/2 ${secundario}`}
               />
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar alumno o evidencia..."
-                className={`w-full rounded-xl border py-2.5 pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-blue-600/15 ${t.entrada}`}
+                placeholder="Buscar estudiante o DNI..."
+                className={`w-full rounded-lg border py-2 pl-8 pr-3 text-xs outline-none ${t.entrada}`}
               />
             </div>
 
             <div className="flex gap-1.5">
-              {["Pendientes", "Evaluadas", "Todas"].map((f) => (
+              {["Todos", "Pendientes", "Completos"].map((f) => (
                 <button
                   key={f}
+                  type="button"
                   onClick={() => setFiltro(f)}
                   aria-pressed={filtro === f}
-                  className={`flex-1 cursor-pointer rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${foco} ${
+                  className={`flex-1 cursor-pointer rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${foco} ${
                     filtro === f ? t.chipOn : t.boton
                   }`}
                 >
@@ -496,455 +868,408 @@ export default function EvaluacionEvidencias({ darkMode }) {
                 </button>
               ))}
             </div>
-
           </div>
 
-          <ul className="max-h-[600px] overflow-y-auto">
-
-            {visibles.map((e) => (
-
-              <li key={e.clave}>
-                <button
-                  onClick={() => elegir(e)}
-                  className={`flex w-full cursor-pointer items-center gap-3 border-b border-l-2 px-4 py-3.5 text-left transition-colors ${
-                    actual?.clave === e.clave
-                      ? `border-l-blue-600 ${d ? "bg-blue-500/10" : "bg-blue-50/60"}`
-                      : `border-l-transparent ${t.fila}`
-                  } ${t.borde}`}
-                >
-
-                  <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[11px] font-bold ${
-                    d
-                      ? "bg-slate-700 text-slate-200"
-                      : "bg-slate-100 text-slate-600"
-                  }`}>
-                    {iniciales(e.a.nombre)}
-                  </span>
-
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-semibold">
-                      {e.a.nombre}
-                    </span>
-                    <span className={`mt-1 block truncate text-[11px] ${secundario}`}>
-                      {e.tipo}
-                    </span>
-                  </span>
-
-                  {hecha(e) ? (
-                    <span className="text-sm font-bold text-emerald-600">
-                      {evals[e.clave].nota}/20
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-600">
-                      Pendiente
-                    </span>
-                  )}
-
-                </button>
+          <ul className="max-h-[600px] divide-y divide-slate-200/60 overflow-y-auto dark:divide-slate-700/60">
+            {cargandoAlumnos && alumnos.length === 0 ? (
+              <li className={`px-4 py-10 text-center text-xs ${secundario}`}>
+                Cargando estudiantes asignados...
               </li>
-
-            ))}
-
-            {visibles.length === 0 && (
-              <li className={`px-5 py-12 text-center ${secundario}`}>
-                <ClipboardCheck size={30} className="mx-auto mb-3 opacity-50" />
-                <p className="text-xs font-medium">
-                  No se encontraron evidencias.
-                </p>
-                <p className="mt-1 text-[11px]">
-                  Prueba con otro filtro o búsqueda.
-                </p>
+            ) : errorAlumnos ? (
+              <li className="px-4 py-10 text-center text-xs text-rose-500">
+                {errorAlumnos}
               </li>
+            ) : visibles.length === 0 ? (
+              <li className={`px-4 py-10 text-center text-xs ${secundario}`}>
+                No hay estudiantes asignados que coincidan.
+              </li>
+            ) : (
+              visibles.map((a) => {
+                const activo = claveAlumno(a) === selA;
+                const n = nRegistradas(a);
+                return (
+                  <li key={claveAlumno(a)}>
+                    <button
+                      type="button"
+                      onClick={() => elegirAlumno(a)}
+                      className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${
+                        activo
+                          ? d
+                            ? "bg-blue-500/15"
+                            : "bg-blue-50/80"
+                          : t.fila
+                      }`}
+                    >
+                      <span
+                        className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg text-xs font-bold ${
+                          activo ? "bg-blue-600 text-white" : "bg-blue-600/10 text-blue-600"
+                        }`}
+                      >
+                        {iniciales(a.nombre)}
+                      </span>
+
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-bold">{a.nombre}</span>
+                        <span className={`mt-0.5 block truncate text-[11px] ${secundario}`}>
+                          {a.dni ? `DNI ${a.dni} · ` : ""}{a.entidad}
+                        </span>
+                      </span>
+
+                      <span className="flex shrink-0 items-center gap-1 text-xs font-semibold">
+                        <span className={n === TIPOS.length ? "text-emerald-600" : secundario}>
+                          {n}/{TIPOS.length}
+                        </span>
+                        <ChevronRight size={14} className={activo ? "text-blue-600" : secundario} />
+                      </span>
+                    </button>
+                  </li>
+                );
+              })
             )}
-
           </ul>
-
         </section>
 
-        {/* Panel de evaluación */}
-        {actual ? (
-
-          <section className={`${tarjeta} rounded-2xl p-5 sm:p-6`}>
-
-            {/* Información del alumno */}
-            <div className={`flex flex-wrap items-start justify-between gap-4 border-b pb-5 ${t.borde}`}>
-
-              <div className="flex items-start gap-3">
-
-                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-blue-500/10 text-blue-500">
-                  <GraduationCap size={24} />
-                </div>
-
+        {/* Detalle de evidencias del alumno */}
+        {alumnoActual ? (
+          <section key={claveAlumno(alumnoActual)} className={`${t.tarjeta} rounded-xl p-5 md:p-6`}>
+            <div className={`flex flex-wrap items-start justify-between gap-4 border-b pb-4 ${t.borde}`}>
+              <div className="flex items-center gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-600 text-sm font-bold text-white">
+                  {iniciales(alumnoActual.nombre)}
+                </span>
                 <div>
-                  <p className={`text-[11px] font-semibold uppercase tracking-wider ${secundario}`}>
-                    {actual.tipo}
+                  <h2 className="text-base font-bold">{alumnoActual.nombre}</h2>
+                  <p className={`text-xs ${secundario}`}>
+                    {alumnoActual.dni ? `DNI ${alumnoActual.dni}` : ""}
+                    {alumnoActual.id_expediente ? ` · Expediente #${alumnoActual.id_expediente}` : ""}
+                    {cargandoEvidenciasBD ? " · Consultando evidencias_efsrt..." : ""}
                   </p>
-                  <h2 className="mt-1 text-lg font-bold">
-                    {actual.a.nombre}
-                  </h2>
-                  <p className={`mt-1 text-xs ${secundario}`}>
-                    DNI: {actual.a.dni}
+                  <p className={`mt-1 flex flex-wrap items-center gap-3 text-xs ${secundario}`}>
+                    <span className="inline-flex items-center gap-1">
+                      <Building2 size={12} /> {alumnoActual.entidad}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Briefcase size={12} /> {alumnoActual.proyecto}
+                    </span>
                   </p>
                 </div>
-
               </div>
 
-              {hecha(actual) && (
-                <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-600">
-                  <CheckCircle2 size={14} />
-                  Evaluada
-                </span>
-              )}
-
+              <button
+                type="button"
+                onClick={() => irAlExpedienteAlumno(alumnoActual)}
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold text-blue-600 transition ${t.boton}`}
+              >
+                Ver expediente
+                <ExternalLink size={12} />
+              </button>
             </div>
 
-            {/* Información adicional */}
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-
-              <div className={`rounded-xl p-3 ${d ? "bg-slate-800/70" : "bg-slate-50"}`}>
-                <p className={`flex items-center gap-1.5 text-[11px] ${secundario}`}>
-                  <Building2 size={13} />
-                  Entidad de prácticas
-                </p>
-                <p className="mt-1 text-xs font-semibold">
-                  {actual.a.entidad}
-                </p>
-              </div>
-
-              <div className={`rounded-xl p-3 ${d ? "bg-slate-800/70" : "bg-slate-50"}`}>
-                <p className={`text-[11px] ${secundario}`}>
-                  Proyecto asignado
-                </p>
-                <p className="mt-1 text-xs font-semibold">
-                  {actual.a.proyecto}
-                </p>
-              </div>
-
-            </div>
-
-            {/* Adjuntar evidencias */}
-            <div className={`mt-7 rounded-2xl border p-5 ${
-              d
-                ? "border-slate-700 bg-slate-800/40"
-                : "border-slate-200 bg-slate-50/70"
-            }`}>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Paperclip size={18} className="text-blue-500" />
-                    <h3 className="font-bold">Evidencias adjuntas</h3>
-                  </div>
-
-                  <p className={`mt-1 text-xs ${secundario}`}>
-                    Documentos recopilados y adjuntados por el docente.
-                  </p>
-                </div>
-
-                <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                  archivosActuales.length
-                    ? "bg-emerald-500/10 text-emerald-600"
-                    : d
-                      ? "bg-slate-700 text-slate-300"
-                      : "bg-slate-200 text-slate-600"
-                }`}>
-                  {archivosActuales.length} archivos
+            {/* Selector de las 3 evidencias */}
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <span className="font-semibold">Tipo de evidencia</span>
+                <span className={secundario}>
+                  {nRegistradas(alumnoActual)} de {TIPOS.length} registradas
                 </span>
-
               </div>
 
-              {/* Zona de carga */}
-              <label className={`mt-5 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-5 py-8 text-center transition hover:border-blue-500 ${
-                d
-                  ? "border-slate-600 bg-slate-800/50 hover:bg-blue-500/5"
-                  : "border-slate-300 bg-white hover:bg-blue-50/50"
-              }`}>
-
-                <div className="grid h-12 w-12 place-items-center rounded-xl bg-blue-500/10 text-blue-500">
-                  <Upload size={23} />
-                </div>
-
-                <p className="mt-3 text-sm font-bold">
-                  Adjuntar evidencias
-                </p>
-
-                <p className={`mt-1 text-xs ${secundario}`}>
-                  Selecciona documentos desde tu computadora
-                </p>
-
-                <p className={`mt-2 text-[10px] ${secundario}`}>
-                  PDF, Word, Excel e imágenes · Máximo 15 MB por archivo
-                </p>
-
-                <input
-                  type="file"
-                  multiple
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
-                  onChange={adjuntarArchivos}
-                  className="hidden"
-                />
-
-              </label>
-
-              {/* Lista de archivos */}
-              <div className="mt-4 space-y-2">
-
-                {archivosActuales.map((archivo, index) => (
-
-                  <div
-                    key={`${archivo.name}-${index}`}
-                    className={`flex items-center gap-3 rounded-xl border p-3 ${
-                      d
-                        ? "border-slate-700 bg-slate-800"
-                        : "border-slate-200 bg-white"
-                    }`}
-                  >
-
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-blue-500/10 text-blue-500">
-                      <FileText size={19} />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-semibold">
-                        {archivo.name}
-                      </p>
-
-                      <p className={`mt-1 text-[10px] ${secundario}`}>
-                        {formatoPeso(archivo.size)}
-                      </p>
-                    </div>
-
+              <div className="grid gap-2 sm:grid-cols-3">
+                {TIPOS.map((tipo, i) => {
+                  const est = estadoEv(alumnoActual, tipo);
+                  const act = i === tipoIdx;
+                  return (
                     <button
+                      key={tipo}
                       type="button"
-                      onClick={() => abrirArchivo(archivo)}
-                      title="Visualizar archivo"
-                      className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-blue-500 transition hover:bg-blue-500/10"
+                      onClick={() => elegirTipo(i)}
+                      aria-pressed={act}
+                      className={`cursor-pointer rounded-xl border px-3.5 py-2.5 text-left transition ${foco} ${
+                        act
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : `${t.boton}`
+                      }`}
                     >
-                      <Eye size={17} />
+                      <div className="truncate text-xs font-semibold">{tipo}</div>
+                      <div
+                        className={`mt-0.5 text-[11px] ${act ? "text-white/85" : ""}`}
+                        style={act ? undefined : { color: COLOR_ESTADO[est] }}
+                      >
+                        {est}
+                      </div>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => eliminarArchivo(index)}
-                      title="Eliminar archivo"
-                      className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-red-500 transition hover:bg-red-500/10"
-                    >
-                      <Trash2 size={17} />
-                    </button>
-
-                  </div>
-
-                ))}
-
-                {archivosActuales.length === 0 && (
-                  <p className={`py-3 text-center text-xs ${secundario}`}>
-                    Todavía no se han adjuntado evidencias para esta evaluación.
-                  </p>
-                )}
-
+                  );
+                })}
               </div>
-
-              <div className={`mt-4 flex items-start gap-2 border-t pt-3 ${t.borde}`}>
-                <Clock size={14} className={`mt-0.5 shrink-0 ${secundario}`} />
-
-                <p className={`text-[10px] leading-relaxed ${secundario}`}>
-                  Los archivos son temporales y permanecen disponibles mientras
-                  esta sesión de la aplicación esté abierta. Al recargar la
-                  página se deberán adjuntar nuevamente.
-                </p>
-              </div>
-
             </div>
 
-            {/* Rúbrica */}
-            <div className="mt-7">
-
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+            {/* Editor de evidencia */}
+            <div key={clave} className="mt-5 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h3 className="font-bold">Rúbrica de evaluación</h3>
-                  <p className={`mt-1 text-xs ${secundario}`}>
-                    Asigna un nivel de desempeño a cada criterio.
-                  </p>
+                  <h3 className="text-sm font-bold">{tipoActual}</h3>
+                  <p className={`text-xs ${secundario}`}>{AYUDA_TIPO[tipoActual]}</p>
                 </div>
-
-                <span className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold ${d ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
-                  Escala del 1 al 5
-                </span>
+                <Chip estado={estadoEv(alumnoActual, tipoActual)} />
               </div>
 
-              <div className="space-y-5">
+              {/* Adjuntar varias fotos/archivos y elegir cuáles revisar */}
+              <div>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1.5 font-semibold">
+                    <Paperclip size={13} className="text-blue-600" />
+                    Fotos y archivos de evidencia
+                  </span>
+                  <span className={secundario}>
+                    Elegidas para revisión: <b className="text-blue-600">{archivosSeleccionadosCount}</b> / {totalArchivosEvidencia}
+                  </span>
+                </div>
 
-                {CRITERIOS.map((criterio, index) => (
+                <label
+                  onDragOver={(e) => { e.preventDefault(); setArrastrando(true); }}
+                  onDragLeave={() => setArrastrando(false)}
+                  onDrop={soltarArchivos}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border border-dashed px-4 py-4 transition ${
+                    arrastrando
+                      ? "border-blue-600 bg-blue-600/10"
+                      : d
+                        ? "border-slate-600 hover:border-blue-500"
+                        : "border-slate-300 hover:border-blue-500 hover:bg-blue-50/40"
+                  }`}
+                >
+                  <Upload size={18} className="shrink-0 text-blue-600" />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold">
+                      Adjuntar varias fotos o archivos
+                    </span>
+                    <span className={`block text-[11px] ${secundario}`}>
+                      Haz clic o arrastra · Múltiples fotos (JPG, PNG, WEBP), PDF, Word o Excel · hasta 15 MB
+                    </span>
+                  </span>
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.gif"
+                    onChange={adjuntarArchivos}
+                    className="hidden"
+                  />
+                </label>
 
-                  <div key={criterio}>
-
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="text-[13px] font-semibold">
-                        {index + 1}. {criterio}
-                      </span>
-
-                      <span className={`text-[11px] ${secundario}`}>
-                        {borrador.puntos[criterio]
-                          ? `${borrador.puntos[criterio]}/5`
-                          : "Sin calificar"}
-                      </span>
-                    </div>
-
-                    <div className="flex gap-2">
-
-                      {NIVELES.map((nivel) => (
-
+                <div className="mt-3 space-y-2">
+                  {archivosBDActuales.map((item, index) => {
+                    const sel = item.seleccionada !== false;
+                    return (
+                      <div
+                        key={item.id || `${item.name}-${index}`}
+                        onClick={() => alternarSeleccionEvidencia(true, index)}
+                        className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-xs transition ${
+                          sel ? "border-blue-500/60 bg-blue-500/5" : sub
+                        }`}
+                      >
                         <button
-                          key={nivel}
-                          onClick={() => calificar(criterio, nivel)}
-                          aria-label={`${criterio}: ${nivel} puntos`}
-                          aria-pressed={borrador.puntos[criterio] === nivel}
-                          className={`grid h-10 flex-1 cursor-pointer place-items-center rounded-lg border text-xs font-bold transition-all ${foco} ${
-                            borrador.puntos[criterio] === nivel
-                              ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                              : t.boton
-                          }`}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            alternarSeleccionEvidencia(true, index);
+                          }}
+                          title={sel ? "Elegida para revisar" : "Elegir para revisar"}
+                          className="text-blue-600"
                         >
-                          {nivel}
+                          {sel ? <CheckSquare size={16} /> : <Square size={16} className={secundario} />}
                         </button>
 
-                      ))}
+                        {item.esFoto && item.url ? (
+                          <img
+                            src={item.url}
+                            alt={item.name}
+                            className="h-9 w-9 shrink-0 rounded object-cover"
+                          />
+                        ) : (
+                          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded ${sub}`}>
+                            {item.esFoto ? <ImageIcon size={15} /> : <FileText size={15} />}
+                          </span>
+                        )}
 
-                    </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{item.name}</p>
+                          <p className={`text-[10px] ${secundario}`}>
+                            {sel ? "Elegida para revisión" : "No elegida"}
+                            {item.size ? ` · ${formatoPeso(item.size)}` : ""}
+                          </p>
+                        </div>
 
-                    <div className={`mt-1.5 flex justify-between text-[10px] ${secundario}`}>
-                      <span>Deficiente</span>
-                      <span>Excelente</span>
-                    </div>
+                        {item.url && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              abrirArchivo(item);
+                            }}
+                            title="Ver archivo"
+                            className="cursor-pointer rounded p-1.5 text-blue-600 hover:bg-blue-600/10"
+                          >
+                            <Eye size={15} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
 
-                  </div>
+                  {archivosNuevos.map((archivo, index) => {
+                    const sel = archivo.seleccionada !== false;
+                    return (
+                      <div
+                        key={archivo.id || `${archivo.name}-${index}`}
+                        onClick={() => alternarSeleccionEvidencia(false, index)}
+                        className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-xs transition ${
+                          sel ? "border-blue-500/60 bg-blue-500/5" : sub
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            alternarSeleccionEvidencia(false, index);
+                          }}
+                          title={sel ? "Elegida para revisar" : "Elegir para revisar"}
+                          className="text-blue-600"
+                        >
+                          {sel ? <CheckSquare size={16} /> : <Square size={16} className={secundario} />}
+                        </button>
 
-                ))}
+                        {archivo.esFoto && archivo.previewUrl ? (
+                          <img
+                            src={archivo.previewUrl}
+                            alt={archivo.name}
+                            className="h-9 w-9 shrink-0 rounded object-cover"
+                          />
+                        ) : (
+                          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded ${sub}`}>
+                            {archivo.esFoto ? <ImageIcon size={15} /> : <FileText size={15} />}
+                          </span>
+                        )}
 
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{archivo.name}</p>
+                          <p className={`text-[10px] ${secundario}`}>
+                            {formatoPeso(archivo.size)} · {sel ? "Elegida para revisión" : "No elegida"}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            abrirArchivo(archivo);
+                          }}
+                          title="Ver archivo"
+                          className="cursor-pointer rounded p-1.5 text-blue-600 hover:bg-blue-600/10"
+                        >
+                          <Eye size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            eliminarArchivoNuevo(index);
+                          }}
+                          title="Quitar archivo"
+                          className="cursor-pointer rounded p-1.5 text-rose-500 hover:bg-rose-500/10"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {totalArchivosEvidencia === 0 && (
+                    <p className={`py-2 text-center text-xs ${secundario}`}>
+                      Sin fotos ni archivos adjuntos para esta evidencia.
+                    </p>
+                  )}
+                </div>
               </div>
 
-            </div>
-
-            {/* Comentarios */}
-            <div className="mt-7">
-
-              <label
-                htmlFor="ev-com"
-                className="mb-2 flex items-center gap-2 text-xs font-bold"
-              >
-                <MessageSquare size={15} />
-                Comentarios y observaciones
-              </label>
-
-              <textarea
-                id="ev-com"
-                rows={4}
-                value={borrador.comentario}
-                onChange={(e) =>
-                  setBorrador((prev) => ({
-                    ...prev,
-                    comentario: e.target.value
-                  }))
-                }
-                placeholder="Escribe observaciones, recomendaciones o aspectos que el alumno debe mejorar..."
-                className={`w-full resize-none rounded-xl border px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-600/15 ${t.entrada}`}
-              />
-
-            </div>
-
-            {/* Resultado y guardado */}
-            <div className={`mt-6 flex flex-col gap-5 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between ${
-              d
-                ? "border-slate-700 bg-slate-800/50"
-                : "border-slate-200 bg-slate-50"
-            }`}>
-
-              <div>
-                <p className={`text-xs font-semibold ${secundario}`}>
-                  CALIFICACIÓN FINAL
-                </p>
-
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className={`text-4xl font-extrabold tabular-nums ${
-                    !completo
-                      ? secundario
-                      : nota >= 11
-                        ? "text-emerald-600"
-                        : "text-red-600"
-                  }`}>
-                    {completo ? nota : "--"}
-                  </span>
-
-                  <span className={`text-sm ${secundario}`}>
-                    / 20 puntos
-                  </span>
+              {/* Estado y observaciones */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold">Estado de la revisión</p>
+                <div className="flex flex-wrap gap-2">
+                  {ESTADOS_REVISION.map((est) => {
+                    const act = bor.estado === est;
+                    const c = COLOR_ESTADO[est];
+                    return (
+                      <button
+                        key={est}
+                        type="button"
+                        onClick={() => setBor({ estado: est })}
+                        className={`cursor-pointer rounded-lg border px-3.5 py-1.5 text-xs font-semibold transition ${foco} ${
+                          act ? "text-white" : t.boton
+                        }`}
+                        style={act ? { background: c, borderColor: c } : undefined}
+                      >
+                        {est}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                <p className={`mt-1 text-[11px] ${secundario}`}>
-                  {completo
-                    ? nota >= 11
-                      ? "Calificación aprobatoria"
-                      : "Calificación desaprobatoria"
-                    : "Completa los cuatro criterios"}
-                </p>
+                <div>
+                  <label htmlFor="ev-com" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
+                    <MessageSquare size={13} />
+                    Comentarios y observaciones
+                  </label>
+                  <textarea
+                    id="ev-com"
+                    rows={3}
+                    value={bor.comentario}
+                    onChange={(e) => setBor({ comentario: e.target.value })}
+                    placeholder="Escribe observaciones sobre las evidencias elegidas..."
+                    className={`w-full resize-none rounded-lg border p-3 text-xs outline-none ${t.entrada}`}
+                  />
+                </div>
               </div>
 
-              <div className="flex flex-col gap-2">
-
-                {aviso && (
-                  <span
-                    role="status"
-                    className={`max-w-xs text-xs font-medium ${
-                      aviso.startsWith("Evaluación")
-                        ? "text-emerald-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {aviso}
-                  </span>
-                )}
+              {/* Pie y guardar */}
+              <div className={`flex flex-wrap items-center justify-between gap-3 border-t pt-4 ${t.borde}`}>
+                <div className="text-xs">
+                  {aviso ? (
+                    <span
+                      className={`inline-flex items-center gap-1 font-semibold ${
+                        aviso.tipo === "ok" ? "text-emerald-600" : "text-rose-500"
+                      }`}
+                    >
+                      {aviso.tipo === "ok" ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                      {aviso.texto}
+                    </span>
+                  ) : sucio ? (
+                    <span className="font-medium text-amber-600">Cambios sin guardar</span>
+                  ) : guardada ? (
+                    <span className={secundario}>Último registro: {guardada.fecha}</span>
+                  ) : null}
+                </div>
 
                 <button
+                  type="button"
+                  disabled={guardando}
                   onClick={guardar}
-                  className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-xs font-bold text-white transition hover:bg-blue-700 ${foco}`}
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60 ${foco}`}
                 >
-                  <ClipboardCheck size={16} />
-                  {hecha(actual)
-                    ? "Actualizar evaluación"
-                    : "Guardar evaluación"}
+                  <ClipboardCheck size={15} />
+                  {guardando ? "Guardando..." : guardada ? "Actualizar evidencia" : "Guardar evidencia"}
                 </button>
-
               </div>
-
             </div>
-
-            {hecha(actual) && (
-              <p className={`mt-3 text-right text-[11px] ${secundario}`}>
-                Última evaluación: {evals[actual.clave].fecha}
-              </p>
-            )}
-
           </section>
-
         ) : (
-
-          <section className={`${tarjeta} flex min-h-[400px] flex-col items-center justify-center rounded-2xl p-8 text-center`}>
-            <Star size={38} className={`mb-3 ${secundario}`} />
-            <h3 className="font-bold">No hay evidencias disponibles</h3>
-            <p className={`mt-2 max-w-sm text-xs ${secundario}`}>
-              No hay registros que coincidan con los filtros seleccionados.
+          <section className={`${t.tarjeta} flex min-h-[380px] flex-col items-center justify-center rounded-xl p-8 text-center`}>
+            <Users size={28} className="mb-3 text-blue-600" />
+            <h3 className="text-sm font-bold">Selecciona un estudiante asignado</h3>
+            <p className={`mt-1 max-w-xs text-xs ${secundario}`}>
+              Elige un alumno de la lista para ver sus evidencias de <code>evidencias_efsrt</code>.
             </p>
           </section>
-
         )}
-
       </div>
-
-      <p className={`text-center text-[11px] ${secundario}`}>
-        Datos de demostración almacenados localmente. Los archivos adjuntos son temporales.
-      </p>
-
     </div>
   );
 }

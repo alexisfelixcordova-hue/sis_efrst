@@ -5,7 +5,6 @@ import {
   UserCheck,
   BookOpen,
   GraduationCap,
-  ArrowUpRight,
   UserRoundPlus,
   SlidersHorizontal,
   Filter,
@@ -14,8 +13,10 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import api from "../../../api/axios";
-import ModalAsignarEstudiantes from "./componentes/ModalAsignarEstudiantes";
+import api, { getCachedData, clearApiCache } from "../../../api/axios";
+import AsignarEstudiantes from "./componentes/AsignarEstudiante";
+
+const BASE_URL = "http://localhost:8000";
 
 const avatares = [
   "https://i.pravatar.cc/80?img=47",
@@ -24,6 +25,41 @@ const avatares = [
   "https://i.pravatar.cc/80?img=13",
   "https://i.pravatar.cc/80?img=49",
 ];
+
+const resolverFotoDocente = (docente, index) => {
+  const fallback = avatares[index % avatares.length];
+  const raw = docente?.foto_perfil || docente?.foto || docente?.avatar || "";
+  if (!raw || typeof raw !== "string" || !raw.trim()) return fallback;
+  const limpio = raw.trim();
+  if (
+    limpio.startsWith("http://") ||
+    limpio.startsWith("https://") ||
+    limpio.startsWith("data:") ||
+    limpio.startsWith("blob:")
+  ) {
+    return limpio;
+  }
+  const rutaLimpia = limpio.startsWith("/") ? limpio : `/${limpio}`;
+  return `${BASE_URL}${rutaLimpia}`;
+};
+
+const AvatarDocente = ({ docente, index, nombreCompleto }) => {
+  const fallback = avatares[index % avatares.length];
+  const [src, setSrc] = useState(() => resolverFotoDocente(docente, index));
+
+  useEffect(() => {
+    setSrc(resolverFotoDocente(docente, index));
+  }, [docente, index]);
+
+  return (
+    <img
+      src={src}
+      alt={nombreCompleto}
+      onError={() => setSrc(fallback)}
+      className="h-10 w-10 rounded-full object-cover"
+    />
+  );
+};
 
 const estadoEstilos = {
   "Cupo Completo": "bg-red-50 text-red-700 ring-red-600/10",
@@ -38,16 +74,39 @@ const extraerLista = (payload) => {
   return [];
 };
 
+const extraerNombresModulos = (arreglo) => {
+  const nombres = arreglo
+    .map(
+      (m) =>
+        m?.nombre ??
+        m?.nombre_modulo ??
+        m?.modulo ??
+        m?.titulo ??
+        m?.descripcion
+    )
+    .filter(Boolean);
+  return [...new Set(nombres)];
+};
+
 export default function PlantelDocente({
   onVerFicha,
   onAsignarEstudiantes,
   darkMode = false,
 }) {
-  const [docentes, setDocentes] = useState([]);
-  const [estudiantes, setEstudiantes] = useState([]);
-  const [modulosData, setModulosData] = useState([]);
-  const [listaModulos, setListaModulos] = useState([]);
-  const [cargando, setCargando] = useState(true);
+  const cachedDocentes = getCachedData("/docentes");
+  const cachedEstudiantes = getCachedData("/estudiantes");
+  const cachedModulos = getCachedData("/modulos-profesionales");
+
+  const initialDocentes = extraerLista(cachedDocentes);
+  const initialEstudiantes = extraerLista(cachedEstudiantes);
+  const initialModulosData = extraerLista(cachedModulos);
+  const initialListaModulos = extraerNombresModulos(initialModulosData);
+
+  const [docentes, setDocentes] = useState(initialDocentes);
+  const [estudiantes, setEstudiantes] = useState(initialEstudiantes);
+  const [modulosData, setModulosData] = useState(initialModulosData);
+  const [listaModulos, setListaModulos] = useState(initialListaModulos);
+  const [cargando, setCargando] = useState(initialDocentes.length === 0);
   const [error, setError] = useState(null);
 
   const [busqueda, setBusqueda] = useState("");
@@ -57,28 +116,26 @@ export default function PlantelDocente({
   const [soloDisponibles, setSoloDisponibles] = useState(false);
   const [pagina, setPagina] = useState(1);
 
-  const [modalAsignarAbierto, setModalAsignarAbierto] = useState(false);
+  const [vistaAsignarActiva, setVistaAsignarActiva] = useState(false);
   const [docenteParaAsignar, setDocenteParaAsignar] = useState(null);
 
   const porPagina = 5;
 
-  const obtenerDocentes = async () => {
-    setCargando(true);
+  const obtenerDocentes = async ({ mostrarCargando = true } = {}) => {
+    if (mostrarCargando && docentes.length === 0) {
+      setCargando(true);
+    }
     setError(null);
     try {
-      const token =
-        localStorage.getItem("access_token") || localStorage.getItem("token");
-
-      const response = await api.get("/docentes", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
+      const response = await api.get("/docentes");
       const lista = extraerLista(response.data);
       setDocentes(lista);
     } catch (err) {
       console.error("Error al cargar asesores:", err);
-      setError("No se pudieron cargar los asesores desde el servidor.");
-      setDocentes([]);
+      if (docentes.length === 0) {
+        setError("No se pudieron cargar los asesores desde el servidor.");
+        setDocentes([]);
+      }
     } finally {
       setCargando(false);
     }
@@ -86,67 +143,54 @@ export default function PlantelDocente({
 
   const obtenerModulos = async () => {
     try {
-      const token =
-        localStorage.getItem("access_token") || localStorage.getItem("token");
-
-      const response = await api.get("/modulos-profesionales", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
+      const response = await api.get("/modulos-profesionales");
       const arreglo = extraerLista(response.data);
       setModulosData(arreglo);
-
-      const nombres = arreglo
-        .map(
-          (m) =>
-            m?.nombre ??
-            m?.nombre_modulo ??
-            m?.modulo ??
-            m?.titulo ??
-            m?.descripcion
-        )
-        .filter(Boolean);
-
-      setListaModulos([...new Set(nombres)]);
+      setListaModulos(extraerNombresModulos(arreglo));
     } catch (err) {
       console.error("Error al cargar módulos:", err);
-      setModulosData([]);
-      setListaModulos([]);
     }
   };
 
   const obtenerEstudiantes = async () => {
     try {
-      const token =
-        localStorage.getItem("access_token") || localStorage.getItem("token");
-
-      const response = await api.get("/estudiantes", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
+      const response = await api.get("/estudiantes");
       const lista = extraerLista(response.data);
       setEstudiantes(lista);
     } catch (err) {
       console.error("Error al cargar estudiantes:", err);
-      setEstudiantes([]);
     }
   };
 
-  const actualizarTodo = async () => {
+  const actualizarTodo = async ({ forzarRefresco = false } = {}) => {
+    if (forzarRefresco) {
+      clearApiCache();
+      setCargando(true);
+    }
     await Promise.all([
-      obtenerDocentes(),
+      obtenerDocentes({ mostrarCargando: forzarRefresco || docentes.length === 0 }),
       obtenerModulos(),
       obtenerEstudiantes(),
     ]);
   };
 
   useEffect(() => {
-    actualizarTodo();
+    const faltaAlgo =
+      initialDocentes.length === 0 ||
+      initialEstudiantes.length === 0 ||
+      initialModulosData.length === 0;
+
+    if (faltaAlgo) {
+      actualizarTodo({ forzarRefresco: false });
+    } else {
+      setCargando(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const abrirModalAsignar = (docente = null) => {
+  const abrirVistaAsignar = (docente = null) => {
     setDocenteParaAsignar(docente);
-    setModalAsignarAbierto(true);
+    setVistaAsignarActiva(true);
     onAsignarEstudiantes?.(docente);
   };
 
@@ -233,21 +277,51 @@ export default function PlantelDocente({
         inactivo: "text-slate-600 hover:bg-slate-50",
       };
 
+  if (vistaAsignarActiva) {
+    return (
+      <main className={`min-h-full ${tema.texto}`}>
+        <AsignarEstudiantes
+          onVolver={() => setVistaAsignarActiva(false)}
+          docentes={docentes}
+          docenteInicial={docenteParaAsignar}
+          estudiantes={estudiantes}
+          modulos={modulosData}
+          darkMode={darkMode}
+          onGuardadoExitoso={() => actualizarTodo({ forzarRefresco: true })}
+        />
+      </main>
+    );
+  }
+
   return (
     <main className={`min-h-full space-y-6 ${tema.texto}`}>
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-blue-600">
-            <Users size={17} />
-            <span>Gestión académica</span>
-            <ArrowUpRight size={15} />
-          </div>
+      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        {/* Ruta, título grande y subtítulo (mismo estilo que Reportes, Constancias y Empresas) */}
+        <div className="font-['Plus_Jakarta_Sans',system-ui,sans-serif]">
+          <p
+            className={`text-xs leading-4 ${
+              darkMode ? "text-slate-500" : "text-slate-400"
+            }`}
+          >
+            Gestión académica <span className="mx-1">/</span>{" "}
+            <span
+              className={`font-medium ${
+                darkMode ? "text-slate-300" : "text-slate-700"
+              }`}
+            >
+              Plantel docente
+            </span>
+          </p>
 
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Plantel docente
+          <h1
+            className={`mt-2 text-[30px] font-extrabold leading-9 tracking-[-0.025em] ${
+              darkMode ? "text-white" : "text-slate-900"
+            }`}
+          >
+            Plantel docente EFSRT
           </h1>
 
-          <p className={`mt-2 text-sm ${tema.secundario}`}>
+          <p className={`mt-1 text-[13px] leading-5 ${tema.secundario}`}>
             Administra y consulta los docentes asesores asignados al EFSRT.
           </p>
         </div>
@@ -255,7 +329,7 @@ export default function PlantelDocente({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={actualizarTodo}
+            onClick={() => actualizarTodo({ forzarRefresco: true })}
             className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold transition ${tema.panel} ${tema.inactivo}`}
           >
             <RefreshCcw size={16} className={cargando ? "animate-spin" : ""} />
@@ -265,7 +339,7 @@ export default function PlantelDocente({
           <button
             type="button"
             onClick={() =>
-              abrirModalAsignar(filtrados[0] || docentes[0] || null)
+              abrirVistaAsignar(filtrados[0] || docentes[0] || null)
             }
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
           >
@@ -439,7 +513,7 @@ export default function PlantelDocente({
             </thead>
 
             <tbody>
-              {cargando ? (
+              {cargando && visibles.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-5 py-12 text-center">
                     <p className={`text-sm ${tema.secundario}`}>
@@ -465,15 +539,15 @@ export default function PlantelDocente({
 
                   return (
                     <tr
-                      key={docente.id_usuario || docente.id}
+                      key={docente.id_usuario || docente.id || index}
                       className={`border-t transition ${tema.fila}`}
                     >
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
-                          <img
-                            src={avatares[index % avatares.length]}
-                            alt=""
-                            className="h-10 w-10 rounded-full object-cover"
+                          <AvatarDocente
+                            docente={docente}
+                            index={index}
+                            nombreCompleto={nombreCompleto}
                           />
                           <div>
                             <p className="font-semibold">{nombreCompleto}</p>
@@ -629,17 +703,6 @@ export default function PlantelDocente({
           </div>
         </footer>
       </section>
-
-      <ModalAsignarEstudiantes
-        abierto={modalAsignarAbierto}
-        onCerrar={() => setModalAsignarAbierto(false)}
-        docentes={docentes}
-        docenteInicial={docenteParaAsignar}
-        estudiantes={estudiantes}
-        modulos={modulosData}
-        darkMode={darkMode}
-        onGuardadoExitoso={actualizarTodo}
-      />
     </main>
   );
 }

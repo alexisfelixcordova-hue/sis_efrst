@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 import Navbar from "./componentes/Layout/Navbar.jsx";
 import Sidebar from "./componentes/Layout/Sidebar.jsx";
@@ -11,6 +10,7 @@ import ExpedienteAlumno from "./componentes/vistas/Estudiantes/ExpedienteAlumno.
 import PlantelDocente from "./componentes/vistas/Docente/Planteldocente.jsx";
 import FichaDocente from "./componentes/vistas/Docente/Fichadocente.jsx";
 import MisAlumnos from "./componentes/vistas/Docente/MisAlumnos.jsx";
+import CalificarEstudiante from "./componentes/vistas/Calificar/CalificarEstudiantes.jsx";
 
 import Constancias from "./componentes/vistas/Constancias/Constancias.jsx";
 import VistaConstanciaPDF from "./componentes/vistas/Constancias/VistaConstanciaPDF.jsx";
@@ -39,9 +39,30 @@ import Contacts from "./componentes/Apps/Contacts/Contacts.jsx";
 
 const API = "http://localhost:8000/api";
 
+const obtenerToken = () =>
+  localStorage.getItem("token") ||
+  localStorage.getItem("access_token") ||
+  sessionStorage.getItem("token") ||
+  sessionStorage.getItem("access_token");
+
+const limpiarAlmacenamientoSesion = () => {
+  localStorage.removeItem("token");
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("user");
+  sessionStorage.removeItem("token");
+  sessionStorage.removeItem("access_token");
+  sessionStorage.clear();
+};
+
+const notificarCambioUsuario = () => {
+  window.dispatchEvent(new Event("usuario_actualizado"));
+  window.dispatchEvent(new Event("user-updated"));
+};
+
 function App() {
   const [vista, setVista] = useState("Dashboard");
   const [estudianteSeleccionado, setEstudianteSeleccionado] = useState(null);
+  const [origenExpediente, setOrigenExpediente] = useState("Estudiantes");
   const [docenteSeleccionado, setDocenteSeleccionado] = useState(null);
   const [constanciaSeleccionada, setConstanciaSeleccionada] = useState(null);
   const [darkMode, setDarkMode] = useState(false);
@@ -50,9 +71,32 @@ function App() {
   const [cargandoSesion, setCargandoSesion] = useState(true);
   const [usuarioBD, setUsuarioBD] = useState(null);
 
+  const consultarPerfilBD = async (tokenOverride = null) => {
+    const token = tokenOverride || obtenerToken();
+    if (!token) return null;
+
+    const res = await fetch(`${API}/perfil`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success || !data.data) {
+      return null;
+    }
+
+    setUsuarioBD(data.data);
+    localStorage.setItem("user", JSON.stringify(data.data));
+    notificarCambioUsuario();
+    return data.data;
+  };
+
   useEffect(() => {
     const verificarSesionBD = async () => {
-      const token = localStorage.getItem("token");
+      const token = obtenerToken();
 
       if (!token) {
         setAutenticado(false);
@@ -62,31 +106,20 @@ function App() {
       }
 
       try {
-        const res = await fetch(`${API}/perfil`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json"
-          }
-        });
-
-        const data = await res.json();
-
-        if (res.ok && data.success) {
-          setUsuarioBD(data.data);
-          localStorage.setItem("user", JSON.stringify(data.data));
+        const perfil = await consultarPerfilBD(token);
+        if (perfil) {
           setAutenticado(true);
         } else {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
+          limpiarAlmacenamientoSesion();
           setUsuarioBD(null);
+          notificarCambioUsuario();
           setAutenticado(false);
         }
       } catch (error) {
         console.error("Error al conectar con la base de datos:", error);
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
+        limpiarAlmacenamientoSesion();
         setUsuarioBD(null);
+        notificarCambioUsuario();
         setAutenticado(false);
       } finally {
         setCargandoSesion(false);
@@ -94,6 +127,24 @@ function App() {
     };
 
     verificarSesionBD();
+  }, []);
+
+  useEffect(() => {
+    const sincronizarDesdeStorage = () => {
+      try {
+        const rawUser = JSON.parse(localStorage.getItem("user") || "null");
+        setUsuarioBD(rawUser && typeof rawUser === "object" ? rawUser : null);
+      } catch {
+        setUsuarioBD(null);
+      }
+    };
+
+    window.addEventListener("usuario_actualizado", sincronizarDesdeStorage);
+    window.addEventListener("user-updated", sincronizarDesdeStorage);
+    return () => {
+      window.removeEventListener("usuario_actualizado", sincronizarDesdeStorage);
+      window.removeEventListener("user-updated", sincronizarDesdeStorage);
+    };
   }, []);
 
   const cambiarVista = (nuevaVista) => {
@@ -105,10 +156,28 @@ function App() {
     setVista("Ficha Docente");
   };
 
-  const abrirFichaEstudiante = (estudiante) => {
-    setEstudianteSeleccionado(estudiante);
+  const abrirFichaEstudiante = useCallback((estudiante, origen = null) => {
+    if (!estudiante) return;
+    if (origen) {
+      setOrigenExpediente(origen);
+    }
+    setEstudianteSeleccionado({
+      ...estudiante,
+      _refresco: estudiante._refresco || Date.now(),
+    });
     setVista("Expediente Alumno");
-  };
+  }, []);
+
+  useEffect(() => {
+    const alAbrirExpedienteAlumno = (e) => {
+      if (e?.detail) {
+        abrirFichaEstudiante(e.detail, "Constancias");
+      }
+    };
+
+    window.addEventListener("expediente-alumno:abrir", alAbrirExpedienteAlumno);
+    return () => window.removeEventListener("expediente-alumno:abrir", alAbrirExpedienteAlumno);
+  }, [abrirFichaEstudiante]);
 
   const abrirVistaConstancia = (estudiante) => {
     setConstanciaSeleccionada(estudiante);
@@ -116,36 +185,52 @@ function App() {
   };
 
   const cerrarSesion = () => {
-    fetch(`${API}/logout`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-        Accept: "application/json"
-      }
-    }).catch(() => {});
+    const token = obtenerToken();
 
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    sessionStorage.clear();
+    if (token) {
+      fetch(`${API}/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      }).catch(() => {});
+    }
+
+    limpiarAlmacenamientoSesion();
 
     setEstudianteSeleccionado(null);
+    setOrigenExpediente("Estudiantes");
     setDocenteSeleccionado(null);
     setConstanciaSeleccionada(null);
     setVista("Dashboard");
     setUsuarioBD(null);
     setAutenticado(false);
+    notificarCambioUsuario();
   };
 
   const renderizarVista = () => {
     switch (vista) {
       case "Dashboard":
-        return <Dashboard />;
+        return (
+          <Dashboard
+            setVista={setVista}
+            setEstudiante={setEstudianteSeleccionado}
+            usuario={usuarioBD}
+            darkMode={darkMode}
+          />
+        );
 
       case "Empresas":
         return <Empresas />;
 
       case "Perfil":
-        return <Credenciales estudiante={estudianteSeleccionado} />;
+        return (
+          <Credenciales
+            estudiante={estudianteSeleccionado}
+            usuario={usuarioBD}
+          />
+        );
 
       case "Revisiones":
       case "Revisión de Expedientes":
@@ -157,7 +242,7 @@ function App() {
       case "Estudiantes":
         return (
           <Estudiantes
-            onVerEstudiante={abrirFichaEstudiante}
+            onVerEstudiante={(est) => abrirFichaEstudiante(est, "Estudiantes")}
             onNuevoEstudiante={() => console.log("Nuevo estudiante")}
           />
         );
@@ -168,6 +253,17 @@ function App() {
 
       case "Evaluación de Evidencias":
         return <EvaluacionEvidencias darkMode={darkMode} />;
+
+      case "Calificar Estudiante":
+      case "CalificarEstudiante":
+        return (
+          <CalificarEstudiante
+            setVista={setVista}
+            estudianteInicial={estudianteSeleccionado}
+            usuario={usuarioBD}
+            darkMode={darkMode}
+          />
+        );
 
       case "Empresas Asignadas":
         return <EmpresasAsignadas darkMode={darkMode} />;
@@ -193,7 +289,7 @@ function App() {
         return (
           <Estudiantes
             estudianteSeleccionado={estudianteSeleccionado}
-            onVerEstudiante={abrirFichaEstudiante}
+            onVerEstudiante={(est) => abrirFichaEstudiante(est, "Estudiantes")}
           />
         );
 
@@ -201,6 +297,7 @@ function App() {
         return (
           <Constancias
             estudiante={constanciaSeleccionada}
+            onSeleccionarEstudiante={(est) => abrirFichaEstudiante(est, "Constancias")}
             onVerConstancia={abrirVistaConstancia}
           />
         );
@@ -216,13 +313,13 @@ function App() {
       case "Expediente Alumno":
         return (
           <ExpedienteAlumno
+            key={estudianteSeleccionado?._refresco || estudianteSeleccionado?.id_estudiante || "exp"}
             estudiante={estudianteSeleccionado}
-            onVolver={() => setVista("Estudiantes")}
+            onVolver={() => setVista(origenExpediente || "Estudiantes")}
             darkMode={darkMode}
           />
         );
 
-      // Usuarios
       case "Usuarios":
       case "Lista de Usuarios":
       case "ListaUsuario":
@@ -240,7 +337,6 @@ function App() {
           />
         );
 
-      // Apps
       case "Notas":
         return <Notas darkMode={darkMode} />;
 
@@ -285,12 +381,12 @@ function App() {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Accept: "application/json"
+              Accept: "application/json",
             },
             body: JSON.stringify({
               correo: datos.correo ?? datos.email ?? datos.usuario,
-              password: datos.password ?? datos.contrasena
-            })
+              password: datos.password ?? datos.contrasena,
+            }),
           });
 
           const data = await res.json().catch(() => ({}));
@@ -299,24 +395,26 @@ function App() {
             throw new Error(data.message || "Credenciales incorrectas");
           }
 
-          localStorage.setItem("token", data.access_token);
-        }}
-        onExito={async () => {
-          const token = localStorage.getItem("token");
-
-          if (token) {
-            const res = await fetch(`${API}/perfil`, {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                Accept: "application/json"
-              }
-            });
-
-            const data = await res.json();
-
-            if (res.ok && data.success) {
-              setUsuarioBD(data.data);
+          if (data.access_token) {
+            if (datos.recordar !== false) {
+              localStorage.setItem("token", data.access_token);
+              localStorage.setItem("access_token", data.access_token);
+            } else {
+              sessionStorage.setItem("token", data.access_token);
+              sessionStorage.setItem("access_token", data.access_token);
             }
+          }
+
+          return data;
+        }}
+        onExito={async (dataLogin) => {
+          const token = dataLogin?.access_token || obtenerToken();
+          const perfilBD = await consultarPerfilBD(token);
+
+          if (!perfilBD && dataLogin?.user) {
+            setUsuarioBD(dataLogin.user);
+            localStorage.setItem("user", JSON.stringify(dataLogin.user));
+            notificarCambioUsuario();
           }
 
           setAutenticado(true);
@@ -345,6 +443,7 @@ function App() {
         <Navbar
           darkMode={darkMode}
           setDarkMode={setDarkMode}
+          usuario={usuarioBD}
           onIrPerfil={() => cambiarVista("Perfil")}
           onIrAjustes={() => cambiarVista("Perfil")}
           onCerrarSesion={cerrarSesion}

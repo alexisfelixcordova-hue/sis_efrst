@@ -3,7 +3,6 @@ import { User, Lock, Eye, EyeOff, ArrowRight, ChevronRight, Check, AlertCircle, 
 import fotoLogin from "../../assets/portada.jpeg";
 import LogoDiseño from "../../assets/LogoDiseño.png";
 import LogoInstituto from "../../assets/LogoInstituto.png";
-import LogoDiseño2 from "../../assets/LogoDiseño2.jpeg";
 import api from "../../api/axios"; // Ajusta la ruta según tu carpeta de Axios
 
 const DURACION_TOAST = 5000; // ms
@@ -16,7 +15,7 @@ const estilosToast = `
 @media (prefers-reduced-motion: reduce) { .lg-toast-in, .lg-toast-bar { animation: none !important; } }
 `;
 
-export default function Login({ foto = fotoLogin, onExito }) {
+export default function Login({ foto = fotoLogin, onLogin, onExito }) {
   const [abierto, setAbierto] = useState(false);
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
@@ -26,7 +25,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
   // Toast: { id, mensaje } — el id reinicia la animación si el error se repite
   const [toast, setToast] = useState(null);
 
-  // Se cierra solo después de unos segundos
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), DURACION_TOAST);
@@ -39,26 +37,39 @@ export default function Login({ foto = fotoLogin, onExito }) {
     setCargando(true);
 
     try {
-      const response = await api.post("/login", {
-        correo: correo,
-        password: password,
-      });
+      let dataLogin = null;
 
-      const token = response.data.access_token;
-
-      if (recordar) {
-        localStorage.setItem("token", token);
+      if (onLogin) {
+        dataLogin = await onLogin({ correo, password, recordar });
       } else {
-        sessionStorage.setItem("token", token);
+        const response = await api.post("/login", {
+          correo: correo,
+          password: password,
+        });
+        dataLogin = response.data;
+        const token = dataLogin?.access_token;
+
+        if (token) {
+          if (recordar) {
+            localStorage.setItem("token", token);
+            localStorage.setItem("access_token", token);
+          } else {
+            sessionStorage.setItem("token", token);
+            sessionStorage.setItem("access_token", token);
+          }
+        }
       }
 
       if (onExito) {
-        onExito(response.data);
+        await onExito(dataLogin);
       }
     } catch (err) {
       setToast({
         id: Date.now(),
-        mensaje: err?.response?.data?.message || "Correo o contraseña incorrectos.",
+        mensaje:
+          err?.response?.data?.message ||
+          err?.message ||
+          "Correo o contraseña incorrectos.",
       });
     } finally {
       setCargando(false);
@@ -72,7 +83,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
     <div className="[--z:2] [zoom:var(--z)] relative h-[calc(100dvh/var(--z))] w-[calc(100vw/var(--z))] overflow-hidden bg-white font-['Plus_Jakarta_Sans',Inter,system-ui,sans-serif] text-[#0f172a]">
       <style>{estilosToast}</style>
 
-      {/* ===== MENSAJE FLOTANTE DE ERROR (esquina superior derecha) ===== */}
       {toast && (
         <div
           key={toast.id}
@@ -103,7 +113,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
         </div>
       )}
 
-      {/* ===== FOTO (pantalla completa → mitad izquierda) ===== */}
       <div
         onClick={() => !abierto && setAbierto(true)}
         role={abierto ? undefined : "button"}
@@ -120,7 +129,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
           onError={(e) => (e.currentTarget.style.display = "none")}
         />
 
-        {/* Texto de la pantalla inicial */}
         <div
           className={`absolute inset-0 flex flex-col items-center justify-end bg-gradient-to-t from-[#0b1b3a]/90 via-[#0b1b3a]/40 to-transparent pb-[100px] text-center text-white transition-opacity ${
             abierto
@@ -131,7 +139,7 @@ export default function Login({ foto = fotoLogin, onExito }) {
           <img
             src={LogoDiseño}
             alt="Logo WORLDNIC"
-            className="h-[70px] w-[70px] rounded-[7px]  object-contain p-[3px] "
+            className="h-[70px] w-[70px] rounded-[7px] object-contain p-[3px]"
           />
           <p className="mt-[8px] text-[6px] font-bold uppercase tracking-[0.25em] text-white/70">
             Portal EFSRT
@@ -148,7 +156,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
         </div>
       </div>
 
-      {/* ===== PANEL DE LOGIN (derecha) ===== */}
       <section
         className={`absolute right-0 top-0 flex h-full w-[49.3%] flex-col bg-gradient-to-br from-white via-white to-[#eef2ff] pb-[21px] pl-[26px] pr-[26px] pt-[45px] transition-all duration-700 ${
           abierto
@@ -157,13 +164,12 @@ export default function Login({ foto = fotoLogin, onExito }) {
         }`}
       >
         <div className="mx-auto w-full max-w-[243px]">
-          {/* Marca + Ver foto */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-[7px]">
               <img
                 src={LogoInstituto}
                 alt="Logo WORLDNIC"
-                className="h-[55px] w-[55px] rounded-[7px] object-contain  "
+                className="h-[55px] w-[55px] rounded-[7px] object-contain"
               />
               <div className="leading-none">
                 <p className="text-[10px] font-extrabold tracking-tight">WORLDNIC</p>
@@ -181,7 +187,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
             </button>
           </div>
 
-          {/* Título */}
           <h2 className="mt-[20px] text-[15px] font-bold leading-[1.15] tracking-tight">
             Iniciar Sesión
           </h2>
@@ -189,7 +194,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
             Acceso al Sistema de Control de Experiencias Formativas
           </p>
 
-          {/* Formulario */}
           <form onSubmit={enviar} className="mt-[17px]">
             <label htmlFor="lg-correo" className="block text-[6.3px] font-bold text-[#1e293b]">
               Correo institucional
@@ -271,7 +275,6 @@ export default function Login({ foto = fotoLogin, onExito }) {
           </form>
         </div>
 
-        {/* Pie */}
         <footer className="mx-auto mt-auto flex w-full max-w-[233px] items-center justify-between border-t border-[#e8ecf3] pt-[9px] text-[5.4px] text-[#94a3b8]">
           <span>Acceso institucional seguro</span>
           <span>© 2026 WORLDNIC</span>

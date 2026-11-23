@@ -21,6 +21,8 @@ class User extends Authenticatable
         'nombres',
         'apellidos',
         'correo',
+        'telefono',
+        'foto_perfil',
         'contrasena_hash',
         'estado_cuenta',
         'id_rol',

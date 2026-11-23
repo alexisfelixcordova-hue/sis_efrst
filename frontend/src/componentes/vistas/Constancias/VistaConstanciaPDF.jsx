@@ -71,6 +71,7 @@ export default function VistaConstanciaPDF({ estudiante, onVolver, onGuardar, lo
   const [zoom, setZoom] = useState(1);
   const [aviso, setAviso] = useState('');
   const avisoRef = useRef(null);
+  const hojaRef = useRef(null);
 
   // Si llega otro estudiante, se reinician los datos editables
   useEffect(() => {
@@ -89,7 +90,58 @@ export default function VistaConstanciaPDF({ estudiante, onVolver, onGuardar, lo
 
   const cambiar = (campo) => (e) => setDatos((prev) => ({ ...prev, [campo]: e.target.value }));
 
-  const handleImprimir = () => window.print();
+  const handleImprimir = () => {
+    const hojaEl = hojaRef.current;
+    if (!hojaEl) {
+      window.print();
+      return;
+    }
+
+    const styles = Array.from(
+      document.querySelectorAll('style, link[rel="stylesheet"]')
+    )
+      .map((node) => node.outerHTML)
+      .join('\n');
+
+    const w = window.open('', '_blank', 'width=900,height=1100');
+    if (!w) {
+      window.print();
+      return;
+    }
+
+    w.document.open();
+    w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Constancia EFSRT</title>${styles}<style>
+      @page { size: A4; margin: 0; }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+        width: 595.3pt;
+        height: 841.9pt;
+        overflow: hidden;
+      }
+      .hoja-print-solo {
+        position: relative !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+        animation: none !important;
+        transform: none !important;
+        opacity: 1 !important;
+      }
+      .hoja-print-solo .logo-ph {
+        border-color: transparent !important;
+        color: transparent !important;
+      }
+    </style></head><body>${hojaEl.outerHTML}<script>
+      window.onload = function () {
+        setTimeout(function () {
+          window.print();
+          window.close();
+        }, 250);
+      };
+    </script></body></html>`);
+    w.document.close();
+  };
 
   const copiar = async (texto, msg) => {
     try {
@@ -228,10 +280,12 @@ export default function VistaConstanciaPDF({ estudiante, onVolver, onGuardar, lo
         }
         @page { size: A4; margin: 0; }
         @media print {
+          body * { visibility: hidden !important; }
+          .hoja, .hoja * { visibility: visible !important; }
           html, body { margin: 0 !important; background: #fff !important; }
           .constancia-root { background: #fff !important; padding: 0 !important; min-height: 0 !important; }
           .hoja-wrap { zoom: 1 !important; }
-          .hoja { box-shadow: none !important; margin: 0 !important; height: 841.8pt !important; break-after: avoid; }
+          .hoja { position: fixed !important; left: 0 !important; top: 0 !important; box-shadow: none !important; margin: 0 !important; height: 841.8pt !important; break-after: avoid; }
           .anim-bar, .anim-paper { animation: none !important; opacity: 1 !important; transform: none !important; }
           .hoja .logo-ph { border-color: transparent; color: transparent; }
         }
@@ -414,7 +468,7 @@ export default function VistaConstanciaPDF({ estudiante, onVolver, onGuardar, lo
 
       {/* ═══════════ DOCUMENTO — idéntico al Word (A4) ═══════════ */}
       <div className="hoja-wrap" style={{ zoom }}>
-        <div className="hoja anim-paper">
+        <div ref={hojaRef} className="hoja hoja-print-solo anim-paper">
 
           {/* Cabecera */}
           {logoIestp

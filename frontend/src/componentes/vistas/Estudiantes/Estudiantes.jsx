@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
 import {
   Search,
   Users,
   Eye,
   GraduationCap,
-  ArrowUpRight,
   Filter,
   RefreshCcw,
   BookOpen,
@@ -16,7 +15,6 @@ import {
   Upload,
   ChevronLeft,
   ChevronRight,
-  Command,
   X,
   Mail,
   Phone,
@@ -36,7 +34,7 @@ import {
   Flag,
   Zap,
 } from "lucide-react";
-import api from "../../../api/axios";
+import api, { getCachedData, clearApiCache } from "../../../api/axios";
 import ModalEstudiante from "./componentes/ModalEstudiante";
 import ModalImportarEstudiantes from "./componentes/ModalImportarEstudiantes";
 
@@ -57,16 +55,34 @@ const colorEstado = {
   Egresado: "#10b981",
 };
 
-// Si tu API envía "progreso" (0-100) se usa; si no, se estima según el estado
+const estadoNormalizado = (e) => {
+  const raw = String(e?.estado ?? "").trim();
+  if (!raw) return "En progreso";
+  const low = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (low.includes("egres") || low.includes("complet") || low.includes("titul")) {
+    return "Egresado";
+  }
+  if (low.includes("pend") || low.includes("observ") || low.includes("revis")) {
+    return "Pendiente";
+  }
+  if (low.includes("progreso") || low.includes("activ") || low.includes("curso")) {
+    return "En progreso";
+  }
+  return estados.includes(raw) ? raw : "En progreso";
+};
+
 const tieneProgresoReal = (e) => typeof e?.progreso === "number";
 const obtenerProgreso = (e) => {
   if (tieneProgresoReal(e)) return Math.min(100, Math.max(0, e.progreso));
-  if (e?.estado === "Egresado") return 100;
-  if (e?.estado === "Pendiente") return 20;
+  const est = estadoNormalizado(e);
+  if (est === "Egresado") return 100;
+  if (est === "Pendiente") return 20;
   return 60;
 };
 
-// Etapas del trámite de titulación (se marcan según el avance)
 const etapasTitulacion = [
   { titulo: "Expediente de ingreso", desc: "Documentos personales y académicos verificados", umbral: 10 },
   { titulo: "Prácticas y módulos", desc: "Experiencia formativa y módulos aprobados", umbral: 35 },
@@ -82,27 +98,81 @@ const normalizar = (s = "") =>
     .toLowerCase();
 
 const nombreCompleto = (e) =>
-  `${e?.nombres || ""} ${e?.apellidos || ""}`.trim();
+  `${e?.nombres || e?.nombre || ""} ${e?.apellidos || ""}`.trim();
 
-const iniciales = (e) =>
-  `${(e?.nombres || "?")[0] || ""}${(e?.apellidos || "")[0] || ""}`.toUpperCase();
+const idEstudianteDe = (e) =>
+  e?.id_estudiante ?? e?.id ?? e?.id_usuario ?? null;
+
+const _cacheTabla = new WeakMap();
+const _cachePaleta = new WeakMap();
+const _cacheNombre = new WeakMap();
+
+const textoTabla = (e) => {
+  let v = _cacheTabla.get(e);
+  if (v === undefined) {
+    v = normalizar(
+      [e.dni, e.nombres, e.nombre, e.apellidos, e.programa_estudios, e.semestre]
+        .filter(Boolean)
+        .join(" ")
+    );
+    _cacheTabla.set(e, v);
+  }
+  return v;
+};
+
+const textoPaleta = (e) => {
+  let v = _cachePaleta.get(e);
+  if (v === undefined) {
+    v = normalizar(
+      [
+        e.dni,
+        e.nombres,
+        e.nombre,
+        e.apellidos,
+        e.programa_estudios,
+        e.semestre,
+        e.correo,
+        e.email,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+    _cachePaleta.set(e, v);
+  }
+  return v;
+};
+
+const nombreNormalizado = (e) => {
+  let v = _cacheNombre.get(e);
+  if (v === undefined) {
+    v = normalizar(nombreCompleto(e));
+    _cacheNombre.set(e, v);
+  }
+  return v;
+};
+
+const iniciales = (e) => {
+  const nom = e?.nombres || e?.nombre || "?";
+  const ape = e?.apellidos || "";
+  return `${nom[0] || ""}${ape[0] || ""}`.toUpperCase();
+};
 
 const fotoDe = (e, size = 80) =>
   e?.foto_url ||
-  `https://i.pravatar.cc/${size}?img=${((e?.id_estudiante || 0) % 50) + 1}`;
+  `https://i.pravatar.cc/${size}?img=${((Number(idEstudianteDe(e)) || 0) % 50) + 1}`;
 
 const escaparRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const telefonoWhatsApp = (tel = "") => {
   const digitos = String(tel).replace(/\D/g, "");
-  if (digitos.length === 9) return `51${digitos}`; // Perú
+  if (digitos.length === 9) return `51${digitos}`;
   return digitos;
 };
 
 const valorOrden = (e, campo) => {
   switch (campo) {
     case "nombre":
-      return normalizar(nombreCompleto(e));
+      return nombreNormalizado(e);
     case "dni":
       return String(e.dni || "");
     case "programa":
@@ -110,10 +180,37 @@ const valorOrden = (e, campo) => {
     case "avance":
       return obtenerProgreso(e);
     case "estado":
-      return e.estado || "";
+      return estadoNormalizado(e);
     default:
       return "";
   }
+};
+
+const extraerEstudiantesDePayload = (payload) => {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+
+  const candidato = payload.data ?? payload;
+  if (Array.isArray(candidato)) return candidato;
+  if (candidato && Array.isArray(candidato.data)) return candidato.data;
+  if (candidato && Array.isArray(candidato.estudiantes)) return candidato.estudiantes;
+  if (candidato && Array.isArray(candidato.alumnos)) return candidato.alumnos;
+  if (Array.isArray(payload.estudiantes)) return payload.estudiantes;
+  if (Array.isArray(payload.alumnos)) return payload.alumnos;
+
+  return [];
+};
+
+const leerCacheEstudiantesInicial = () => {
+  const paramsTodos = { all: true, todos: 1, per_page: 1000 };
+  const listas = [
+    extraerEstudiantesDePayload(getCachedData("/estudiantes", paramsTodos)),
+    extraerEstudiantesDePayload(getCachedData("/estudiantes?all=true")),
+    extraerEstudiantesDePayload(getCachedData("/estudiantes")),
+  ];
+  return listas.reduce((mejor, actual) =>
+    actual.length > mejor.length ? actual : mejor
+  , []);
 };
 
 /* ================================================================== */
@@ -129,36 +226,13 @@ const estilosAnimaciones = `
 @keyframes barraTiempo { from { width: 100%; } to { width: 0%; } }
 @keyframes flotar { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 @keyframes gradienteMueve { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
-@keyframes blobMueve { 0%,100% { transform: translate(0,0) scale(1); } 33% { transform: translate(30px,-20px) scale(1.15); } 66% { transform: translate(-20px,20px) scale(.9); } }
 @keyframes confeti { 0% { transform: translateY(-10px) translateX(0) rotate(0); opacity: 1; } 100% { transform: translateY(150px) translateX(var(--dx)) rotate(var(--rot)); opacity: 0; } }
 @keyframes itemEntrada { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulsoNodo { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,.55); } 70% { box-shadow: 0 0 0 10px rgba(59,130,246,0); } 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); } }
 @keyframes barraSube { from { opacity: 0; transform: translate(-50%, 30px); } to { opacity: 1; transform: translate(-50%, 0); } }
-@keyframes brillo { 0% { transform: translateX(-120%) skewX(-20deg); } 100% { transform: translateX(320%) skewX(-20deg); } }
-
-@keyframes barridoPasa { 0% { transform: translateX(-120%) skewX(-20deg); } 100% { transform: translateX(420%) skewX(-20deg); } }
-@keyframes barridoPausa { 0% { transform: translateX(-120%) skewX(-20deg); } 40%, 100% { transform: translateX(420%) skewX(-20deg); } }
 @keyframes barraBrillo { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(100%); } }
 @keyframes cargaBarrido { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
 
-.barrido { position: relative; overflow: hidden; }
-.barrido::after {
-  content: ""; position: absolute; top: 0; left: 0; height: 100%; width: 30%; pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(96,165,250,.22), transparent);
-  transform: translateX(-120%) skewX(-20deg);
-}
-.barrido:hover::after { animation: barridoPasa .9s ease; }
-.header-barrido {
-  position: absolute; top: 0; left: 0; height: 100%; width: 35%;
-  background: linear-gradient(100deg, transparent, rgba(99,102,241,.10), rgba(56,189,248,.16), transparent);
-  transform: translateX(-120%) skewX(-20deg);
-  animation: barridoPausa 7s ease-in-out infinite;
-}
-.banner-barrido {
-  background: linear-gradient(100deg, transparent, rgba(255,255,255,.28), transparent);
-  transform: translateX(-120%) skewX(-20deg);
-  animation: barridoPausa 4.5s ease-in-out infinite;
-}
 .barra-brillo { position: relative; overflow: hidden; }
 .barra-brillo::after {
   content: ""; position: absolute; inset: 0;
@@ -167,14 +241,6 @@ const estilosAnimaciones = `
   animation: barraBrillo 2.6s ease-in-out infinite;
 }
 .barra-carga { animation: cargaBarrido 1.1s ease-in-out infinite; }
-.activo-barrido { position: relative; overflow: hidden; }
-.activo-barrido::after {
-  content: ""; position: absolute; top: 0; left: 0; height: 100%; width: 30%; pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
-  transform: translateX(-120%) skewX(-20deg);
-  animation: barridoPasa .8s ease;
-}
-
 .fila-anim { opacity: 0; animation: filaEntrada .45s ease forwards; }
 .skeleton {
   background: linear-gradient(90deg, rgba(148,163,184,.15) 25%, rgba(148,163,184,.3) 37%, rgba(148,163,184,.15) 63%);
@@ -195,31 +261,7 @@ const estilosAnimaciones = `
   background-size: 300% 100%;
   animation: gradienteMueve 6s linear infinite;
 }
-.texto-gradiente {
-  background: linear-gradient(90deg, #3b82f6, #8b5cf6, #06b6d4, #3b82f6);
-  background-size: 300% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: gradienteMueve 8s linear infinite;
-}
-.blob { animation: blobMueve 12s ease-in-out infinite; }
 .confeti { position: absolute; top: 0; width: 7px; height: 11px; border-radius: 2px; animation: confeti 1.8s ease-out forwards; }
-.boton-brillo { position: relative; overflow: hidden; }
-.boton-brillo::after {
-  content: ""; position: absolute; top: 0; left: 0; height: 100%; width: 30%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
-  transform: translateX(-120%) skewX(-20deg);
-}
-.boton-brillo:hover::after { animation: brillo .9s ease; }
-
-@media (prefers-reduced-motion: reduce) {
-  .fila-anim, .skeleton, .drawer-anim, .fade-anim, .paleta-anim, .alerta-anim, .flotar,
-  .item-anim, .nodo-pulso, .barra-flotante, .borde-animado, .texto-gradiente, .blob, .confeti,
-  .header-barrido, .banner-barrido, .barra-brillo::after, .barra-carga, .barrido:hover::after, .activo-barrido::after {
-    animation: none !important; opacity: 1 !important;
-  }
-}
 `;
 
 /* ================================================================== */
@@ -291,6 +333,8 @@ function Avatar({ estudiante, size = 40, className = "" }) {
       src={fotoDe(estudiante, size * 2)}
       alt=""
       style={px}
+      loading="lazy"
+      decoding="async"
       onError={() => setFallo(true)}
       className={`shrink-0 rounded-full object-cover ${className}`}
     />
@@ -332,7 +376,7 @@ function Confeti() {
 }
 
 /* ================================================================== */
-/*  Tarjeta de estadística (contador + luz del mouse + filtro al clic) */
+/*  Tarjeta de estadística                                             */
 /* ================================================================== */
 function TarjetaEstadistica({
   icono: Icono,
@@ -344,7 +388,6 @@ function TarjetaEstadistica({
   tema,
   darkMode,
   onClick,
-  activa,
 }) {
   const numero = useContador(valor);
   const ref = useRef(null);
@@ -507,13 +550,14 @@ function AnilloProgreso({ valor, color, tamano = 112 }) {
 /*  Insignia de estado                                                 */
 /* ================================================================== */
 function InsigniaEstado({ estado }) {
+  const estadoValido = estadoNormalizado({ estado });
   return (
     <span
       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
-        estiloEstado[estado] || "bg-blue-50 text-blue-700 ring-blue-600/10"
+        estiloEstado[estadoValido] || "bg-blue-50 text-blue-700 ring-blue-600/10"
       }`}
     >
-      {estado || "En progreso"}
+      {estadoValido}
     </span>
   );
 }
@@ -547,18 +591,14 @@ function PaletaComandos({
     if (tokens.length) {
       alumnos = estudiantes
         .filter((e) => {
-          const t = normalizar(
-            [e.dni, e.nombres, e.apellidos, e.programa_estudios, e.semestre, e.correo]
-              .filter(Boolean)
-              .join(" ")
-          );
+          const t = textoPaleta(e);
           return tokens.every((k) => t.includes(k));
         })
         .slice(0, 6);
     } else {
       grupo = "Recientes";
       alumnos = recientes
-        .map((id) => estudiantes.find((e) => e.id_estudiante === id))
+        .map((id) => estudiantes.find((e) => idEstudianteDe(e) === id))
         .filter(Boolean);
     }
     alumnos.forEach((e) =>
@@ -740,9 +780,11 @@ function PanelRapido({
   ];
   const idxTab = tabs.findIndex((t) => t.id === tab);
 
+  const idEst = idEstudianteDe(estudiante);
+  const estadoValido = estadoNormalizado(estudiante);
   const progreso = obtenerProgreso(estudiante);
   const real = tieneProgresoReal(estudiante);
-  const color = colorEstado[estudiante.estado] || colorEstado["En progreso"];
+  const color = colorEstado[estadoValido] || colorEstado["En progreso"];
   const idxActual = etapasTitulacion.findIndex((et) => progreso < et.umbral);
   const proximoPaso = idxActual === -1 ? null : etapasTitulacion[idxActual];
 
@@ -782,14 +824,12 @@ function PanelRapido({
       <aside
         className={`drawer-anim relative z-10 flex h-full w-full max-w-lg flex-col overflow-hidden border-l shadow-2xl ${tema.panel} ${tema.texto}`}
       >
-        {/* Confeti para egresados */}
-        {estudiante.estado === "Egresado" && (
+        {estadoValido === "Egresado" && (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-48 overflow-hidden">
-            <Confeti key={estudiante.id_estudiante} />
+            <Confeti key={idEst} />
           </div>
         )}
 
-        {/* Barra superior */}
         <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-4">
           <div className="flex items-center gap-1">
             <button
@@ -827,23 +867,23 @@ function PanelRapido({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-6">
-          {/* Identidad */}
-          <div key={estudiante.id_estudiante} className="item-anim mt-2 flex items-center gap-4">
+          <div key={idEst} className="item-anim mt-2 flex items-center gap-4">
             <Avatar
               estudiante={estudiante}
               size={80}
               className="ring-2 ring-blue-500/20"
             />
             <div className="min-w-0 pb-1">
-              <h3 className="break-words text-xl font-bold leading-tight">{nombreCompleto(estudiante)}</h3>
+              <h3 className="break-words text-xl font-bold leading-tight">
+                {nombreCompleto(estudiante)}
+              </h3>
               <div className="mt-1 flex items-center gap-2">
-                <InsigniaEstado estado={estudiante.estado} />
-                <span className={`text-xs ${tema.secundario}`}>ID #{estudiante.id_estudiante}</span>
+                <InsigniaEstado estado={estadoValido} />
+                <span className={`text-xs ${tema.secundario}`}>ID #{idEst}</span>
               </div>
             </div>
           </div>
 
-          {/* Pestañas */}
           <div className="relative mt-6 flex border-b border-slate-400/20">
             {tabs.map((t) => (
               <button
@@ -863,8 +903,7 @@ function PanelRapido({
             />
           </div>
 
-          {/* Contenido */}
-          <div key={`${estudiante.id_estudiante}-${tab}`} className="mt-6">
+          <div key={`${idEst}-${tab}`} className="mt-6">
             {tab === "resumen" && (
               <div className="space-y-5">
                 <div className="item-anim flex flex-col items-center" style={retraso(0)}>
@@ -883,7 +922,7 @@ function PanelRapido({
                   <div className={`item-anim rounded-xl border p-3 ${tema.tarjeta}`} style={retraso(2)}>
                     <Flag size={16} className="text-blue-500" />
                     <p className={`mt-2 text-xs ${tema.secundario}`}>Estado</p>
-                    <p className="text-sm font-semibold">{estudiante.estado || "En progreso"}</p>
+                    <p className="text-sm font-semibold">{estadoValido}</p>
                   </div>
                 </div>
 
@@ -968,7 +1007,12 @@ function PanelRapido({
               <div className="space-y-3">
                 {[
                   { clave: "dni", icono: Hash, etiqueta: "DNI", valor: estudiante.dni },
-                  { clave: "correo", icono: Mail, etiqueta: "Correo", valor: estudiante.correo },
+                  {
+                    clave: "correo",
+                    icono: Mail,
+                    etiqueta: "Correo",
+                    valor: estudiante.correo || estudiante.email,
+                  },
                   { clave: "tel", icono: Phone, etiqueta: "Teléfono", valor: estudiante.telefono },
                 ].map((f, i) => {
                   const Icono = f.icono;
@@ -992,9 +1036,13 @@ function PanelRapido({
 
                 <div className="item-anim grid grid-cols-3 gap-2 pt-2" style={retraso(3)}>
                   <a
-                    href={estudiante.correo ? `mailto:${estudiante.correo}` : undefined}
+                    href={
+                      estudiante.correo || estudiante.email
+                        ? `mailto:${estudiante.correo || estudiante.email}`
+                        : undefined
+                    }
                     className={`flex flex-col items-center gap-1 rounded-xl border p-3 text-xs font-semibold transition hover:-translate-y-0.5 ${tema.panel} ${tema.inactivo} ${
-                      !estudiante.correo ? "pointer-events-none opacity-40" : ""
+                      !(estudiante.correo || estudiante.email) ? "pointer-events-none opacity-40" : ""
                     }`}
                   >
                     <Mail size={18} className="text-blue-500" /> Correo
@@ -1027,7 +1075,6 @@ function PanelRapido({
           </div>
         </div>
 
-        {/* Acciones */}
         <div className="flex shrink-0 gap-2 border-t border-slate-400/20 p-4">
           <button
             type="button"
@@ -1062,35 +1109,35 @@ function PanelRapido({
 /*  Componente principal                                               */
 /* ================================================================== */
 export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
-  const [estudiantes, setEstudiantes] = useState([]);
-  const [cargando, setCargando] = useState(true);
+  const [estudiantes, setEstudiantes] = useState(() =>
+    leerCacheEstudiantesInicial()
+  );
+  const [cargando, setCargando] = useState(
+    () => leerCacheEstudiantesInicial().length === 0
+  );
   const [error, setError] = useState(null);
   const [busqueda, setBusqueda] = useState("");
+  const busquedaDif = useDeferredValue(busqueda);
   const [estadoActivo, setEstadoActivo] = useState("Todos");
   const [alerta, setAlerta] = useState({ mensaje: "", tipo: "", id: 0 });
 
-  // Orden, densidad y selección
   const [orden, setOrden] = useState({ campo: null, dir: "asc" });
   const [compacto, setCompacto] = useState(false);
   const [seleccionados, setSeleccionados] = useState([]);
 
-  // Paginación
   const [porPagina, setPorPagina] = useState(10);
   const [paginaActual, setPaginaActual] = useState(1);
 
-  // Modales
   const [modalAbierto, setModalAbierto] = useState(false);
   const [estudianteSeleccionado, setEstudianteSeleccionado] = useState(null);
   const [modalImportarAbierto, setModalImportarAbierto] = useState(false);
 
-  // Vista rápida y paleta
   const [estudianteRapido, setEstudianteRapido] = useState(null);
   const [paletaAbierta, setPaletaAbierta] = useState(false);
   const [recientes, setRecientes] = useState([]);
 
   const inputBusquedaRef = useRef(null);
 
-  /* ---------------- Alertas ---------------- */
   const mostrarAlerta = (mensaje, tipo) => {
     const id = Date.now();
     setAlerta({ mensaje, tipo, id });
@@ -1099,58 +1146,61 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     }, 4000);
   };
 
-  /* ---------------- Datos ---------------- */
-  const obtenerEstudiantes = async () => {
-    setCargando(true);
-    setError(null);
-    try {
-      const response = await api.get("/estudiantes?all=true");
-      const resultado = response.data.data;
+  const obtenerEstudiantes = async ({ forzarRefresco = false } = {}) => {
+    if (forzarRefresco) {
+      clearApiCache();
+      setCargando(true);
+    } else if (estudiantes.length === 0) {
+      setCargando(true);
+    }
 
-      if (Array.isArray(resultado)) {
-        setEstudiantes(resultado);
-      } else if (resultado && Array.isArray(resultado.data)) {
-        setEstudiantes(resultado.data);
-      } else {
-        setEstudiantes([]);
+    setError(null);
+
+    try {
+      const response = await api.get("/estudiantes", {
+        params: { all: true, todos: 1, per_page: 1000 },
+      });
+      const lista = extraerEstudiantesDePayload(response.data);
+
+      if (lista.length > 0 || forzarRefresco) {
+        setEstudiantes(lista);
       }
     } catch (err) {
       console.error("Error al cargar estudiantes:", err);
-      setError("No se pudieron cargar los estudiantes desde el servidor.");
-      setEstudiantes([]);
+      if (estudiantes.length === 0) {
+        setError(
+          err?.response?.data?.message ||
+            "No se pudieron cargar los estudiantes desde el servidor."
+        );
+        setEstudiantes([]);
+      }
     } finally {
       setCargando(false);
     }
   };
 
   useEffect(() => {
-    obtenerEstudiantes();
+    obtenerEstudiantes({ forzarRefresco: false });
+    const sincronizar = () => obtenerEstudiantes({ forzarRefresco: true });
+    window.addEventListener("expediente:actualizado", sincronizar);
+    return () => window.removeEventListener("expediente:actualizado", sincronizar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------------- Filtro y orden ---------------- */
   const estudiantesFiltrados = useMemo(() => {
-    const tokens = normalizar(busqueda).split(/\s+/).filter(Boolean);
+    const tokens = normalizar(busquedaDif).split(/\s+/).filter(Boolean);
 
     return estudiantes.filter((estudiante) => {
-      const texto = normalizar(
-        [
-          estudiante.dni,
-          estudiante.nombres,
-          estudiante.apellidos,
-          estudiante.programa_estudios,
-          estudiante.semestre,
-        ]
-          .filter(Boolean)
-          .join(" ")
-      );
-
-      const coincideBusqueda = tokens.every((t) => texto.includes(t));
-      const coincideEstado =
-        estadoActivo === "Todos" || estudiante.estado === estadoActivo;
-
-      return coincideBusqueda && coincideEstado;
+      if (
+        estadoActivo !== "Todos" &&
+        estadoNormalizado(estudiante) !== estadoActivo
+      )
+        return false;
+      if (!tokens.length) return true;
+      const texto = textoTabla(estudiante);
+      return tokens.every((t) => texto.includes(t));
     });
-  }, [estudiantes, busqueda, estadoActivo]);
+  }, [estudiantes, busquedaDif, estadoActivo]);
 
   const estudiantesOrdenados = useMemo(() => {
     if (!orden.campo) return estudiantesFiltrados;
@@ -1172,7 +1222,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         : { campo: null, dir: "asc" }
     );
 
-  /* ---------------- Paginación ---------------- */
   const totalPaginas = Math.max(
     1,
     Math.ceil(estudiantesOrdenados.length / porPagina)
@@ -1185,7 +1234,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
 
   useEffect(() => {
     setPaginaActual(1);
-  }, [busqueda, estadoActivo, porPagina]);
+  }, [busquedaDif, estadoActivo, porPagina]);
 
   useEffect(() => {
     if (paginaActual > totalPaginas) setPaginaActual(totalPaginas);
@@ -1210,36 +1259,31 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     estudiantesOrdenados.length
   );
 
-  /* ---------------- Navegación del panel lateral ---------------- */
   const listaNav = estudiantesOrdenados;
   const idxNav = estudianteRapido
-    ? listaNav.findIndex((e) => e.id_estudiante === estudianteRapido.id_estudiante)
+    ? listaNav.findIndex((e) => idEstudianteDe(e) === idEstudianteDe(estudianteRapido))
     : -1;
 
   const abrirRapido = (e) => {
+    const id = idEstudianteDe(e);
     setEstudianteRapido(e);
-    setRecientes((r) =>
-      [e.id_estudiante, ...r.filter((x) => x !== e.id_estudiante)].slice(0, 4)
-    );
+    setRecientes((r) => [id, ...r.filter((x) => x !== id)].slice(0, 4));
   };
 
   const irAnterior = () => idxNav > 0 && abrirRapido(listaNav[idxNav - 1]);
   const irSiguiente = () =>
     idxNav >= 0 && idxNav < listaNav.length - 1 && abrirRapido(listaNav[idxNav + 1]);
 
-  // Mantiene el panel sincronizado cuando se recarga la lista
   useEffect(() => {
     if (!estudianteRapido) return;
-    const actualizado = estudiantes.find(
-      (x) => x.id_estudiante === estudianteRapido.id_estudiante
-    );
+    const idRapido = idEstudianteDe(estudianteRapido);
+    const actualizado = estudiantes.find((x) => idEstudianteDe(x) === idRapido);
     if (actualizado && actualizado !== estudianteRapido) {
       setEstudianteRapido(actualizado);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estudiantes]);
 
-  /* ---------------- Atajos de teclado ---------------- */
   useEffect(() => {
     const manejar = (e) => {
       const escribiendo = ["INPUT", "TEXTAREA", "SELECT"].includes(
@@ -1271,7 +1315,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paletaAbierta, estudianteRapido, modalAbierto, modalImportarAbierto, listaNav]);
 
-  /* ---------------- Acciones ---------------- */
   const handleAbrirNuevo = () => {
     setEstudianteSeleccionado(null);
     setModalAbierto(true);
@@ -1283,7 +1326,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
   };
 
   const handleGuardadoExitoso = () => {
-    obtenerEstudiantes();
+    obtenerEstudiantes({ forzarRefresco: true });
     mostrarAlerta(
       estudianteSeleccionado
         ? "Estudiante actualizado correctamente."
@@ -1293,7 +1336,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
   };
 
   const handleImportadoExitoso = (cantidad) => {
-    obtenerEstudiantes();
+    obtenerEstudiantes({ forzarRefresco: true });
     mostrarAlerta(`${cantidad} estudiante(s) importado(s) correctamente.`, "success");
   };
 
@@ -1302,7 +1345,8 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
       return;
     try {
       await api.delete(`/estudiantes/${id}`);
-      setEstudiantes((prev) => prev.filter((e) => e.id_estudiante !== id));
+      clearApiCache();
+      setEstudiantes((prev) => prev.filter((e) => idEstudianteDe(e) !== id));
       setSeleccionados((prev) => prev.filter((x) => x !== id));
       setEstudianteRapido(null);
       mostrarAlerta("Estudiante eliminado correctamente.", "success");
@@ -1324,7 +1368,8 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     const eliminados = ids.filter((_, i) => resultados[i].status === "fulfilled");
     const fallidos = ids.length - eliminados.length;
 
-    setEstudiantes((prev) => prev.filter((e) => !eliminados.includes(e.id_estudiante)));
+    clearApiCache();
+    setEstudiantes((prev) => prev.filter((e) => !eliminados.includes(idEstudianteDe(e))));
     setSeleccionados((prev) => prev.filter((id) => !eliminados.includes(id)));
 
     if (fallidos === 0) {
@@ -1347,8 +1392,15 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     ];
     const filas = lista.map((e) =>
       [
-        e.id_estudiante, e.dni, e.nombres, e.apellidos, e.programa_estudios,
-        e.semestre, e.correo, e.telefono, e.estado,
+        idEstudianteDe(e),
+        e.dni,
+        e.nombres || e.nombre,
+        e.apellidos,
+        e.programa_estudios,
+        e.semestre,
+        e.correo || e.email,
+        e.telefono,
+        estadoNormalizado(e),
       ]
         .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
         .join(",")
@@ -1375,7 +1427,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
 
   const contarEstado = (estado) => {
     if (estado === "Todos") return estudiantes.length;
-    return estudiantes.filter((e) => e.estado === estado).length;
+    return estudiantes.filter((e) => estadoNormalizado(e) === estado).length;
   };
 
   const limpiarFiltros = () => {
@@ -1387,16 +1439,15 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
   const hayFiltros =
     busqueda.trim() !== "" || estadoActivo !== "Todos" || orden.campo !== null;
 
-  /* ---------------- Selección múltiple ---------------- */
   const alternarSeleccion = (id) =>
     setSeleccionados((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const todosPaginaSeleccionados =
     estudiantesPaginados.length > 0 &&
-    estudiantesPaginados.every((e) => seleccionados.includes(e.id_estudiante));
+    estudiantesPaginados.every((e) => seleccionados.includes(idEstudianteDe(e)));
 
   const alternarTodosPagina = () => {
-    const idsPagina = estudiantesPaginados.map((e) => e.id_estudiante);
+    const idsPagina = estudiantesPaginados.map(idEstudianteDe).filter(Boolean);
     setSeleccionados((s) =>
       todosPaginaSeleccionados
         ? s.filter((id) => !idsPagina.includes(id))
@@ -1404,11 +1455,10 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     );
   };
 
-  /* ---------------- Acciones de la paleta ---------------- */
   const accionesPaleta = [
     { label: "Nuevo estudiante", sub: "Registrar un alumno", icono: Plus, accion: handleAbrirNuevo },
     { label: "Importar estudiantes", sub: "Carga masiva desde archivo", icono: Upload, accion: () => setModalImportarAbierto(true) },
-    { label: "Actualizar listado", sub: "Volver a consultar el servidor", icono: RefreshCcw, accion: obtenerEstudiantes },
+    { label: "Actualizar listado", sub: "Volver a consultar el servidor", icono: RefreshCcw, accion: () => obtenerEstudiantes({ forzarRefresco: true }) },
     { label: "Exportar a CSV", sub: `Descargar los ${estudiantesOrdenados.length} alumnos visibles`, icono: Download, accion: () => exportarCSV(estudiantesOrdenados, "estudiantes.csv") },
     { label: "Ver alumnos en progreso", sub: "Filtrar la tabla por estado", icono: GraduationCap, accion: () => setEstadoActivo("En progreso") },
     { label: "Ver alumnos pendientes", sub: "Filtrar la tabla por estado", icono: BookOpen, accion: () => setEstadoActivo("Pendiente") },
@@ -1418,7 +1468,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     { label: compacto ? "Tabla en modo cómodo" : "Tabla en modo compacto", sub: "Cambiar la densidad de las filas", icono: AlignJustify, accion: () => setCompacto((c) => !c) },
   ];
 
-  /* ---------------- Datos para la dona ---------------- */
   const datosDona = [
     { nombre: "En progreso", valor: contarEstado("En progreso"), color: colorEstado["En progreso"] },
     { nombre: "Pendiente", valor: contarEstado("Pendiente"), color: colorEstado["Pendiente"] },
@@ -1426,14 +1475,11 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
   ];
   const totalDona = datosDona.reduce((acc, d) => acc + d.valor, 0);
 
-  /* ---------------- Tema ---------------- */
   const tema = darkMode
     ? {
         texto: "text-slate-100",
         secundario: "text-slate-400",
         panel: "bg-[#1e293b] border-slate-700",
-        fondo: "bg-[#1e293b]",
-        anillo: "ring-[#1e293b]",
         campo:
           "bg-[#0f172a] border-slate-700 text-slate-100 placeholder:text-slate-500",
         fila: "border-slate-700 hover:bg-slate-800/70",
@@ -1445,8 +1491,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         texto: "text-slate-800",
         secundario: "text-slate-500",
         panel: "bg-white border-slate-200",
-        fondo: "bg-white",
-        anillo: "ring-white",
         campo:
           "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400",
         fila: "border-slate-100 hover:bg-slate-50",
@@ -1477,27 +1521,23 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     );
   };
 
-  /* ================================================================ */
-  /*  Render                                                           */
-  /* ================================================================ */
   return (
-    <main className={`min-h-full space-y-6 ${tema.texto}`}>
+    <main className={`min-h-full space-y-6 px-10 pb-8 pt-10 ${tema.texto}`}>
       <style>{estilosAnimaciones}</style>
 
-      {/* Encabezado */}
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-blue-600">
-            <Users size={17} />
+      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+        <div className="min-w-0">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-400">
             <span>Gestión académica</span>
-            <ArrowUpRight size={15} />
+            <span className="text-slate-300">/</span>
+            <span className={darkMode ? "text-slate-300" : "text-slate-600"}>Estudiantes</span>
           </div>
 
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+          <h1 className={`text-[30px] font-extrabold leading-[1.15] tracking-tight ${darkMode ? "text-slate-100" : "text-slate-900"}`}>
             Estudiantes
           </h1>
 
-          <p className={`mt-2 text-sm ${tema.secundario}`}>
+          <p className={`mt-1 text-sm leading-5 ${tema.secundario}`}>
             Administra y consulta la información de los estudiantes registrados.
           </p>
         </div>
@@ -1505,7 +1545,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={obtenerEstudiantes}
+            onClick={() => obtenerEstudiantes({ forzarRefresco: true })}
             className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${tema.panel} ${tema.inactivo}`}
           >
             <RefreshCcw size={16} className={cargando ? "animate-spin" : ""} />
@@ -1532,7 +1572,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         </div>
       </header>
 
-      {/* Notificación con barra de tiempo */}
       {alerta.mensaje && (
         <div
           key={alerta.id}
@@ -1558,7 +1597,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         </div>
       )}
 
-      {/* Tarjetas de estadísticas (filtran al hacer clic) */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <TarjetaEstadistica
           icono={Users}
@@ -1569,7 +1607,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
           descripcion="Total de estudiantes"
           tema={tema}
           darkMode={darkMode}
-          activa={estadoActivo === "Todos"}
           onClick={() => setEstadoActivo("Todos")}
         />
         <TarjetaEstadistica
@@ -1581,7 +1618,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
           descripcion="En progreso académico"
           tema={tema}
           darkMode={darkMode}
-          activa={estadoActivo === "En progreso"}
           onClick={() => setEstadoActivo("En progreso")}
         />
         <TarjetaEstadistica
@@ -1593,7 +1629,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
           descripcion="Requieren seguimiento"
           tema={tema}
           darkMode={darkMode}
-          activa={estadoActivo === "Pendiente"}
           onClick={() => setEstadoActivo("Pendiente")}
         />
         <TarjetaEstadistica
@@ -1605,12 +1640,10 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
           descripcion="Formación concluida"
           tema={tema}
           darkMode={darkMode}
-          activa={estadoActivo === "Egresado"}
           onClick={() => setEstadoActivo("Egresado")}
         />
       </section>
 
-      {/* Distribución por estado */}
       {!cargando && !error && (
         <section className={`fade-anim rounded-xl border p-5 ${tema.tarjeta}`}>
           <div className="mb-4">
@@ -1623,7 +1656,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         </section>
       )}
 
-      {/* Panel de tabla y filtros */}
       <section className={`overflow-hidden rounded-xl border ${tema.panel}`}>
         {cargando && (
           <div className="h-0.5 w-full overflow-hidden bg-blue-500/10">
@@ -1755,14 +1787,15 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                 </tr>
               ) : estudiantesOrdenados.length > 0 ? (
                 estudiantesPaginados.map((estudiante, i) => {
-                  const idEst = estudiante.id_estudiante;
+                  const idEst = idEstudianteDe(estudiante);
                   const marcado = seleccionados.includes(idEst);
                   const progreso = obtenerProgreso(estudiante);
+                  const estadoValido = estadoNormalizado(estudiante);
                   const colorBarra =
-                    colorEstado[estudiante.estado] || colorEstado["En progreso"];
+                    colorEstado[estadoValido] || colorEstado["En progreso"];
                   return (
                     <tr
-                      key={idEst}
+                      key={idEst ?? i}
                       onClick={() => abrirRapido(estudiante)}
                       style={{ animationDelay: `${i * 35}ms` }}
                       className={`fila-anim group cursor-pointer border-t transition ${tema.fila} ${
@@ -1832,7 +1865,9 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                       </td>
 
                       <td className={`px-5 ${pad}`}>
-                        <p className="text-xs">{estudiante.correo || "No registrado"}</p>
+                        <p className="text-xs">
+                          {estudiante.correo || estudiante.email || "No registrado"}
+                        </p>
                         {!compacto && (
                           <p className={`mt-1 text-xs ${tema.secundario}`}>
                             {estudiante.telefono || "Sin teléfono"}
@@ -1855,7 +1890,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                       </td>
 
                       <td className={`px-5 ${pad}`}>
-                        <InsigniaEstado estado={estudiante.estado} />
+                        <InsigniaEstado estado={estadoValido} />
                       </td>
 
                       <td
@@ -1920,7 +1955,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
           </table>
         </div>
 
-        {/* Pie con paginación */}
         <footer
           className={`flex flex-col items-center justify-between gap-4 border-t border-inherit px-5 py-4 text-xs sm:flex-row ${tema.secundario}`}
         >
@@ -1990,7 +2024,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         </footer>
       </section>
 
-      {/* Barra flotante de acciones masivas */}
       {seleccionados.length > 0 && (
         <div
           className={`barra-flotante fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-2xl border px-5 py-3 shadow-2xl ${tema.panel} ${tema.texto}`}
@@ -2003,7 +2036,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
             type="button"
             onClick={() =>
               exportarCSV(
-                estudiantes.filter((e) => seleccionados.includes(e.id_estudiante)),
+                estudiantes.filter((e) => seleccionados.includes(idEstudianteDe(e))),
                 "estudiantes-seleccionados.csv"
               )
             }
@@ -2029,7 +2062,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         </div>
       )}
 
-      {/* Panel lateral de vista rápida */}
       {estudianteRapido && (
         <PanelRapido
           estudiante={estudianteRapido}
@@ -2046,12 +2078,11 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
             handleAbrirEditar(estudianteRapido);
             setEstudianteRapido(null);
           }}
-          onEliminar={() => handleEliminar(estudianteRapido.id_estudiante)}
+          onEliminar={() => handleEliminar(idEstudianteDe(estudianteRapido))}
           tema={tema}
         />
       )}
 
-      {/* Paleta de comandos */}
       {paletaAbierta && (
         <PaletaComandos
           estudiantes={estudiantes}
@@ -2063,7 +2094,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         />
       )}
 
-      {/* Modal 1: registro / edición */}
       <ModalEstudiante
         isOpen={modalAbierto}
         onClose={() => setModalAbierto(false)}
@@ -2072,7 +2102,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
         darkMode={darkMode}
       />
 
-      {/* Modal 2: importación masiva */}
       <ModalImportarEstudiantes
         isOpen={modalImportarAbierto}
         onClose={() => setModalImportarAbierto(false)}

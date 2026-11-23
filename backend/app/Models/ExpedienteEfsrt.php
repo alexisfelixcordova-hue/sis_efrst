@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -36,7 +37,7 @@ class ExpedienteEfsrt extends Model
 
     public function empresa()
     {
-        return $this->belongsTo(EmpresaConvenio::class, 'id_empresa', 'id_empresa');
+        return $this->belongsTo(Empresa::class, 'id_empresa', 'id_empresa');
     }
 
     public function evidencias()
