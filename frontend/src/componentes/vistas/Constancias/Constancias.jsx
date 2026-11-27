@@ -4,8 +4,9 @@ import {
   FiCheckCircle, FiChevronLeft, FiChevronRight, FiAward, FiLoader, FiPrinter,
   FiClock, FiX, FiAlertCircle, FiArrowUp, FiShield, FiCalendar, FiFilter, FiLayers,
 } from 'react-icons/fi';
-import api, { getCachedData, clearApiCache } from '../../../api/axios';
+import api, { getCachedData, invalidateApiCache } from '../../../api/axios';
 import VistaConstanciaPDF from './VistaConstanciaPDF';
+import AvatarEstudiante from '../../AvatarEstudiante.jsx';
 
 /* ═════════════ Sistema de animación ═════════════ */
 const ESTILOS = `
@@ -500,10 +501,6 @@ const dentroDeRango = (e, desde, hasta) => {
   return (!lo || f >= lo) && (!hi || f <= hi);
 };
 
-const iniciales = (e) =>
-  e.ini ||
-  (e.nombre || 'EF').split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
-
 /* ───── Impresión masiva ───── */
 const NOMBRE_INSTITUCION = 'IESTP "Andrés Avelino Cáceres Dorregaray"';
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -653,8 +650,11 @@ const BarraHoras = ({ pct, completas }) => (
 );
 
 const Avatar = ({ e, size = 'h-11 w-11 text-[12px]' }) => (
-  <span className={`${size} relative grid shrink-0 place-items-center rounded-full border border-slate-200 bg-white font-bold text-slate-700`}>
-    {iniciales(e)}
+  <span className={`${size} relative block shrink-0 rounded-full border border-slate-200 bg-white font-bold text-slate-700`}>
+    <AvatarEstudiante
+      estudiante={e}
+      className="h-full w-full rounded-full"
+    />
     <i className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${moduloPunto[e.moduloKey] || moduloPunto.modulo1}`} />
   </span>
 );
@@ -760,7 +760,7 @@ function Tarjeta({ e, indice, onVerExpediente, onVerConstancia, onPedirEmision, 
           <BarraHoras pct={info.pct} completas={info.completas} />
         </div>
 
-        <div className="mt-5 grid grid-cols-[1fr_1.35fr] gap-2.5">
+        <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-[1fr_1.35fr]">
           <button
             type="button"
             onClick={abrir}
@@ -1003,7 +1003,7 @@ function ModalImpresion({ lista, moduloLabel, rangoLabel, onConfirmar, onCancela
 export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }) {
   const cachedConstancias = getCachedData('/constancias-efsrt');
   const cachedEstudiantes = getCachedData('/estudiantes?all=true') || getCachedData('/estudiantes');
-  const cachedExpedientes = getCachedData('/expedientes');
+  const cachedExpedientes = getCachedData('/constancias-efsrt');
 
   const construirListaUnificada = useCallback((rawConstancias, rawEstudiantes, rawExpedientes) => {
     const estudiantesMap = new Map();
@@ -1153,8 +1153,6 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
       _refresco: Date.now(),
     };
 
-    clearApiCache();
-
     try {
       sessionStorage.setItem('expediente_alumno_actual', JSON.stringify(alumnoActualizado));
       localStorage.setItem('expediente_alumno_actual', JSON.stringify(alumnoActualizado));
@@ -1173,7 +1171,7 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
 
   const cargar = useCallback(async ({ forzarRefresco = false } = {}) => {
     if (forzarRefresco) {
-      clearApiCache();
+      invalidateApiCache('/constancias-efsrt');
     }
     if (forzarRefresco || expedientes.length === 0) {
       setCargando(true);
@@ -1183,7 +1181,7 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
       const [resConstancias, resEstudiantes, resExpedientes] = await Promise.allSettled([
         api.get('/constancias-efsrt'),
         api.get('/estudiantes?all=true'),
-        api.get('/expedientes'),
+        api.get('/constancias-efsrt'),
       ]);
 
       const rawConstancias =
@@ -1250,7 +1248,7 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
         .toString()
         .slice(0, 10);
 
-      clearApiCache();
+      invalidateApiCache('/constancias-efsrt');
       setExpedientes((prev) =>
         prev.map((item) =>
           String(item.id_estudiante) === String(estudiante.id_estudiante) &&
@@ -1459,7 +1457,7 @@ export default function Constancias({ onSeleccionarEstudiante, onVerConstancia }
             </Modulo>
 
             <Modulo icon={FiCheckCircle} titulo="Estado" className="border-t border-slate-200 lg:col-span-7 lg:border-l lg:border-t-0">
-              <div role="tablist" aria-label="Estado" className="relative grid grid-cols-4 border-b border-slate-200">
+              <div role="tablist" aria-label="Estado" className="relative grid grid-cols-2 border-b border-slate-200 sm:grid-cols-4">
                 {TABS.map(([k, label]) => {
                   const activa = estado === k;
                   return (

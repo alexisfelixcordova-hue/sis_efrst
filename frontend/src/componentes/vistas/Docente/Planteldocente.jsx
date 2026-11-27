@@ -17,7 +17,7 @@ import {
   Clock,
   UserX,
 } from "lucide-react";
-import api, { getCachedData, clearApiCache } from "../../../api/axios";
+import api, { getCachedData, invalidateApiCache } from "../../../api/axios";
 import AsignarEstudiantes from "./componentes/AsignarEstudiante";
 
 const BASE_URL = "http://localhost:8000";
@@ -215,7 +215,7 @@ export default function PlantelDocente({
 
   const actualizarTodo = async ({ forzarRefresco = false } = {}) => {
     if (forzarRefresco) {
-      clearApiCache();
+      invalidateApiCache("/docentes");
       setCargando(true);
     }
     await Promise.all([

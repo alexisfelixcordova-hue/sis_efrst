@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
-import axios from "axios";
+import api from "../../../api/axios.js";
+import ReportesDocente from "./ReportesDocente.jsx";
 
-const API = "http://localhost:8000/api";
 const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
 const PROGRAMA = "Diseño y Programación Web";
 
@@ -185,7 +185,21 @@ const Kpi = ({ icono, etiqueta, children, detalle, delay, extra }) => (
   </Tarjeta>
 );
 
-export default function Reportes() {
+export default function Reportes({ usuario, darkMode }) {
+  const rolId = Number(usuario?.id_rol ?? usuario?.rol_id);
+  const rolNombre = String(usuario?.rol_nombre ?? usuario?.rol ?? usuario?.role ?? "");
+  const esDocente =
+    rolId === 2 || (rolId !== 1 && /docente|asesor/i.test(rolNombre));
+
+  if (esDocente) {
+    return <ReportesDocente usuario={usuario} darkMode={darkMode} />;
+  }
+
+  return <ReportesAdministrador darkMode={darkMode} />;
+}
+
+function ReportesAdministrador({ darkMode }) {
+  const oscuro = !!darkMode;
   const [y, setY] = useState(2026);
   const [per, setPer] = useState("Mensual");
   const [tipo, setTipo] = useState("linea");
@@ -204,14 +218,9 @@ export default function Reportes() {
 
     const cargarReportes = async () => {
       setCargando(true);
-      const token = localStorage.getItem("token") || localStorage.getItem("access_token");
       try {
-        const { data } = await axios.get(`${API}/reportes/estadisticas`, {
+        const { data } = await api.get("/reportes/estadisticas", {
           params: { anio: y },
-          headers: {
-            Accept: "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
         });
         if (!cancelado) {
           setDatosApi(data);
@@ -412,7 +421,7 @@ export default function Reportes() {
   const moSel = mo !== null ? modulosLista[mo] : null;
 
   return (
-    <div className="w-full space-y-6 px-4 py-6 text-slate-900" style={{ fontFamily: "'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif" }}>
+    <div className={`reportes-page w-full space-y-6 px-4 py-6 text-slate-900 ${oscuro ? "reportes-dark" : ""}`} style={{ fontFamily: "'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif" }}>
       <style>{estilosAnimaciones}</style>
 
       {/* ================= ENCABEZADO ================= */}

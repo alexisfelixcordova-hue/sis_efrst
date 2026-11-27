@@ -1,47 +1,67 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import axios from 'axios';
+import api, { invalidateApiCache } from '../../api/axios.js';
 import {
   Search, Bell, Maximize, Minimize, Settings, ChevronRight, User, LogOut, Sun, Moon,
   Check, Shield, GraduationCap, X, Sparkles, Hash, Mail, Lock, Palette, Camera, Eye, EyeOff,
   Loader2, AlertCircle, Monitor, Copy, Award, ClipboardCheck, LogIn, Info, KeyRound, Trash2,
-  SlidersHorizontal, ChevronDown, FolderOpen, Clock, BookOpen, ListFilter,
+  SlidersHorizontal, ChevronDown, FolderOpen, Clock, BookOpen, ListFilter, Menu as MenuIcon,
 } from 'lucide-react';
 import imagenPerfil from '../../assets/perfil.jpg';
+import AvatarEstudiante from '../AvatarEstudiante.jsx';
+import {
+  leerModuloSistema,
+  normalizarNombreModulo,
+  publicarModuloSistema,
+} from '../../utils/moduloSistema.js';
 
-const API_URL = 'http://localhost:8000/api';
 const BASE_URL = 'http://localhost:8000';
+const API_URL = 'http://localhost:8000/api';
 
 // Ajusta estas rutas a tu API de Laravel
-const ENDPOINT_PERFIL = `${API_URL}/perfil`; // PUT { nombres, apellidos, correo, telefono, modulo_formativo, foto_perfil }
+const ENDPOINT_PERFIL = `${API_URL}/perfil`; // PUT { nombres, apellidos, correo, telefono, foto_perfil }
 const ENDPOINT_CLAVE = `${API_URL}/cambiar-password`; // POST { password_actual, password, password_confirmation }
 
-const NOTIF_DEMO = [
-  { id: 1, categoria: 'constancias', titulo: 'Nueva práctica registrada', detalle: 'Hace 5 min', leida: false },
-  { id: 2, categoria: 'revisiones', titulo: 'Informe pendiente de revisión', detalle: 'Hace 1 h', leida: false },
-  { id: 3, categoria: 'sistema', titulo: 'Alumno validado por MINEDU', detalle: 'Ayer', leida: true },
-  { id: 4, categoria: 'login', titulo: 'Nuevo inicio de sesión detectado', detalle: 'Hoy, 08:30 AM', leida: false },
-];
+const ICONO_CATEGORIA = {
+  asignaciones: GraduationCap,
+  constancias: Award,
+  revisiones: ClipboardCheck,
+  sistema: Info,
+  login: LogIn,
+  clave: KeyRound,
+};
 
-const ICONO_CATEGORIA = { constancias: Award, revisiones: ClipboardCheck, sistema: Info, login: LogIn, clave: KeyRound };
-
-const PREFS_DEFECTO = { login: true, clave: true, constancias: true, revisiones: true, sistema: true };
+const PREFS_DEFECTO = {
+  login: true,
+  clave: true,
+  constancias: true,
+  revisiones: false,
+  sistema: false,
+  asignaciones: true,
+};
 const PREFS_INFO = [
   { id: 'login', t: 'Inicios de sesión', d: 'Aviso cuando se detecte un acceso nuevo a tu cuenta.' },
   { id: 'clave', t: 'Cambios de contraseña', d: 'Confirmación cada vez que se modifique tu contraseña.' },
   { id: 'constancias', t: 'Constancias y prácticas', d: 'Nuevas prácticas registradas y constancias emitidas.' },
   { id: 'revisiones', t: 'Revisiones pendientes', d: 'Informes y expedientes que esperan tu revisión.' },
   { id: 'sistema', t: 'Avisos del sistema', d: 'Validaciones, mantenimientos y novedades de la plataforma.' },
+  { id: 'asignaciones', t: 'Nuevas asignaciones', d: 'Avisos cuando te asignen alumnos.' },
 ];
 
-const MODULOS = ['Módulo I – Soporte', 'Módulo II – Desarrollo', 'Módulo III – Redes'];
 const PROGRAMA = 'Diseño y Programación Web';
 
 // Datos del sistema que la persona puede ajustar (se guardan en este equipo)
-const SISTEMA_DEFECTO = { periodo: '2026-I', porPagina: 6, vista: 'tarjetas' };
+const SISTEMA_DEFECTO = { periodo: '2026-I', porPagina: 6, vista: 'tarjetas', moduloId: '' };
 const PERIODOS = ['2025-II', '2026-I', '2026-II'];
 const cargarSistema = () => {
   try {
-    return { ...SISTEMA_DEFECTO, ...JSON.parse(localStorage.getItem('config_sistema') || '{}') };
+    const guardado = JSON.parse(localStorage.getItem('config_sistema') || '{}');
+    const moduloActivo = leerModuloSistema();
+    return {
+      ...SISTEMA_DEFECTO,
+      ...guardado,
+      moduloId: moduloActivo?.id_modulo ?? '',
+    };
   } catch {
     return { ...SISTEMA_DEFECTO };
   }
@@ -145,12 +165,8 @@ const formDesdeUsuario = (u) => ({
   apellidos: String(u.apellidos || '').trim(),
   correo: String(u.correo || u.email || '').trim(),
   telefono: String(u.telefono || '').trim(),
-  modulo: u.modulo_formativo || u.modulo || MODULOS[1],
   foto: typeof u.foto_perfil === 'string' ? u.foto_perfil : '',
 });
-
-const iniciales = (nombre) =>
-  (nombre || 'U').split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
 
 const escapar = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const resaltar = (texto, q) => {
@@ -252,7 +268,11 @@ function FilaPersona({ p, q, activa, onHover, onAbrir, onExpediente, t }) {
       onClick={onAbrir}
       className={`group flex cursor-pointer items-center gap-3 border-b px-4 py-2.5 transition-colors last:border-0 ${t.borde} ${activa ? 'bg-blue-600/10' : t.hover}`}
     >
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-600/10 text-[11px] font-bold text-blue-600">{iniciales(nombre)}</span>
+      <AvatarEstudiante
+        estudiante={p}
+        className="h-9 w-9 rounded-xl text-[11px] font-bold"
+        fallbackClassName={esDocente ? "bg-blue-600/10 text-blue-600" : "bg-emerald-500/10 text-emerald-600"}
+      />
       <span className="min-w-0 flex-1 leading-snug">
         <span className="block truncate text-[12px] font-semibold">{resaltar(nombre, q)}</span>
         <span className={`block truncate text-[10.5px] ${t.suave}`}>
@@ -360,12 +380,46 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
   const [guardado, setGuardado] = useState('idle');
   const [descartar, setDescartar] = useState(false);
   const [vibrar, setVibrar] = useState(false);
+  const [modulosDisponibles, setModulosDisponibles] = useState([]);
+  const [errorModulos, setErrorModulos] = useState('');
+  const [moduloEditando, setModuloEditando] = useState(null);
+  const [formModulo, setFormModulo] = useState({ numero_modulo: '', nombre_modulo: '', horas_requeridas: '' });
+  const [guardandoModulo, setGuardandoModulo] = useState(false);
+  const [errorGuardarModulo, setErrorGuardarModulo] = useState('');
+  const esAdministrador = Number(usuario?.id_rol ?? usuario?.rol_id) === 1;
   const sacudir = () => { setVibrar(true); setTimeout(() => setVibrar(false), 400); };
   const archivo = useRef(null);
 
   const sucio = JSON.stringify(form) !== JSON.stringify(base.form) || JSON.stringify(prefs) !== JSON.stringify(base.prefs) || JSON.stringify(sistema) !== JSON.stringify(base.sistema);
   const nombreCompleto = `${form.nombres} ${form.apellidos}`.trim() || 'Usuario';
   const foto = resolverUrlFotoUsuario({ foto_perfil: form.foto });
+
+  useEffect(() => {
+    let vigente = true;
+    api.get('/modulos-profesionales', { params: { per_page: 100 } })
+      .then(({ data }) => {
+        const lista = Array.isArray(data?.data?.data)
+          ? data.data.data
+          : Array.isArray(data?.data)
+            ? data.data
+            : Array.isArray(data)
+              ? data
+              : [];
+        if (!vigente) return;
+        setModulosDisponibles(lista);
+        const moduloGuardado = lista.find(
+          (modulo) => String(modulo.id_modulo) === String(base.sistema.moduloId)
+        );
+        if (moduloGuardado) {
+          publicarModuloSistema(moduloGuardado);
+        }
+      })
+      .catch((error) => {
+        console.error('No se pudo cargar el catálogo de módulos:', error);
+        if (vigente) setErrorModulos('No se pudo cargar el catálogo de módulos.');
+      });
+    return () => { vigente = false; };
+  }, [base.sistema.moduloId]);
 
   const intentarCerrar = () => {
     if (sucio && !descartar) { setDescartar(true); sacudir(); return; }
@@ -382,6 +436,67 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
   });
 
   const cambiar = (c) => { setForm((f) => ({ ...f, ...c })); setErrores((e) => ({ ...e, ...Object.fromEntries(Object.keys(c).map((k) => [k, undefined])) })); setDescartar(false); };
+  const cambiarModuloSistema = (id) => {
+    const modulo = modulosDisponibles.find(
+      (item) => String(item.id_modulo) === String(id)
+    );
+    setSistema((actual) => ({ ...actual, moduloId: id }));
+    setDescartar(false);
+    publicarModuloSistema(modulo || null);
+  };
+
+  const editarModulo = (modulo) => {
+    setModuloEditando(String(modulo.id_modulo));
+    setFormModulo({
+      numero_modulo: String(modulo.numero_modulo ?? ''),
+      nombre_modulo: modulo.nombre_modulo ?? '',
+      horas_requeridas: String(modulo.horas_requeridas ?? ''),
+    });
+    setErrorGuardarModulo('');
+  };
+
+  const guardarModulo = async () => {
+    if (!esAdministrador || !moduloEditando || guardandoModulo) return;
+    if (
+      !Number.isInteger(Number(formModulo.numero_modulo)) ||
+      Number(formModulo.numero_modulo) < 1 ||
+      !formModulo.nombre_modulo.trim() ||
+      !Number.isInteger(Number(formModulo.horas_requeridas)) ||
+      Number(formModulo.horas_requeridas) < 1
+    ) {
+      setErrorGuardarModulo('Completa un número, nombre y cantidad de horas válidos.');
+      return;
+    }
+    setGuardandoModulo(true);
+    setErrorGuardarModulo('');
+    try {
+      const { data } = await api.put(`/modulos-profesionales/${moduloEditando}`, {
+        numero_modulo: Number(formModulo.numero_modulo),
+        nombre_modulo: formModulo.nombre_modulo.trim(),
+        horas_requeridas: Number(formModulo.horas_requeridas),
+      });
+      const guardado = data?.data;
+      if (!guardado) throw new Error('El servidor no devolvió el módulo actualizado.');
+
+      setModulosDisponibles((actuales) =>
+        actuales.map((modulo) =>
+          String(modulo.id_modulo) === String(guardado.id_modulo) ? guardado : modulo
+        )
+      );
+      if (String(sistema.moduloId) === String(guardado.id_modulo)) {
+        publicarModuloSistema(guardado);
+      }
+      setModuloEditando(null);
+      avisar('ok', 'Módulo actualizado correctamente.');
+    } catch (error) {
+      console.error('No se pudo actualizar el módulo:', error);
+      setErrorGuardarModulo(
+        error.response?.data?.message || error.message || 'No se pudo actualizar el módulo.'
+      );
+    } finally {
+      setGuardandoModulo(false);
+    }
+  };
 
   const elegirFoto = async (e) => {
     const f = e.target.files?.[0];
@@ -405,13 +520,14 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
     setGuardado('cargando');
 
     const perfilCambio = JSON.stringify(form) !== JSON.stringify(base.form);
+    const preferenciasCambio = JSON.stringify(prefs) !== JSON.stringify(base.prefs);
     let enServidor = true;
     if (perfilCambio) {
       const token = localStorage.getItem('token') || localStorage.getItem('access_token');
       try {
         await axios.put(
           ENDPOINT_PERFIL,
-          { nombres: form.nombres, apellidos: form.apellidos, correo: form.correo, telefono: form.telefono, modulo_formativo: form.modulo, foto_perfil: form.foto },
+          { nombres: form.nombres, apellidos: form.apellidos, correo: form.correo, telefono: form.telefono, foto_perfil: form.foto },
           { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
         );
       } catch {
@@ -419,11 +535,29 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
       }
     }
 
+    if (preferenciasCambio) {
+      try {
+        await api.post('/notificaciones/preferencias', { preferencias: prefs });
+      } catch (error) {
+        console.error('No se pudieron guardar las preferencias de notificaciones:', error);
+        enServidor = false;
+      }
+    }
+
     try { localStorage.setItem('preferencias_notificaciones', JSON.stringify(prefs)); } catch { /* ignorar */ }
     window.dispatchEvent(new CustomEvent('preferencias_notif_cambiadas', { detail: prefs }));
     try { localStorage.setItem('config_sistema', JSON.stringify(sistema)); } catch { /* ignorar */ }
+    if (modulosDisponibles.length > 0) {
+      const moduloSeleccionado = modulosDisponibles.find(
+        (modulo) => String(modulo.id_modulo) === String(sistema.moduloId)
+      );
+      publicarModuloSistema(moduloSeleccionado || null);
+    }
     window.dispatchEvent(new CustomEvent('config_sistema_cambiada', { detail: sistema }));
-    onGuardado({ nombres: form.nombres, apellidos: form.apellidos, correo: form.correo, email: form.correo, telefono: form.telefono, modulo_formativo: form.modulo, foto_perfil: form.foto }, perfilCambio ? enServidor : null);
+    onGuardado(
+      { nombres: form.nombres, apellidos: form.apellidos, correo: form.correo, email: form.correo, telefono: form.telefono, foto_perfil: form.foto },
+      perfilCambio || preferenciasCambio ? enServidor : null
+    );
 
     setBase({ form: { ...form }, prefs: { ...prefs }, sistema: { ...sistema } });
     setDescartar(false);
@@ -431,7 +565,19 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
     setTimeout(() => setGuardado('idle'), 1800);
   };
 
-  const descartarCambios = () => { setForm(base.form); setPrefs(base.prefs); setSistema(base.sistema); setErrores({}); setDescartar(false); };
+  const descartarCambios = () => {
+    setForm(base.form);
+    setPrefs(base.prefs);
+    setSistema(base.sistema);
+    setErrores({});
+    setDescartar(false);
+    if (modulosDisponibles.length > 0) {
+      const moduloBase = modulosDisponibles.find(
+        (modulo) => String(modulo.id_modulo) === String(base.sistema.moduloId)
+      );
+      publicarModuloSistema(moduloBase || null);
+    }
+  };
 
   /* Contraseña */
   const [clave, setClave] = useState({ actual: '', nueva: '', repetir: '' });
@@ -648,16 +794,22 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
                   <Desplegable
                     Icono={BookOpen}
                     titulo="Datos académicos"
-                    resumen={`${form.modulo} · Periodo ${sistema.periodo}`}
+                    resumen={`${normalizarNombreModulo(modulosDisponibles.find((modulo) => String(modulo.id_modulo) === String(sistema.moduloId))?.nombre_modulo || 'Todos los módulos')} · Periodo ${sistema.periodo}`}
                     abierto={abiertos.academico}
                     onToggle={() => setAbiertos((a) => ({ ...a, academico: !a.academico }))}
                     t={t}
                   >
                     <div className="grid gap-4 sm:grid-cols-2">
                       <Campo etiqueta="Módulo formativo" t={t}>
-                        <select value={form.modulo} onChange={(e) => cambiar({ modulo: e.target.value })} className={`${entrada()} cursor-pointer`}>
-                          {MODULOS.map((m) => <option key={m} value={m}>{m}</option>)}
+                        <select value={sistema.moduloId} onChange={(e) => cambiarModuloSistema(e.target.value)} disabled={modulosDisponibles.length === 0} className={`${entrada()} cursor-pointer disabled:cursor-not-allowed disabled:opacity-60`}>
+                          <option value="">Todos los módulos</option>
+                          {modulosDisponibles.map((modulo) => (
+                            <option key={modulo.id_modulo} value={modulo.id_modulo}>
+                              {normalizarNombreModulo(modulo.nombre_modulo)}
+                            </option>
+                          ))}
                         </select>
+                        {errorModulos && <p role="alert" className="mt-1 text-xs text-rose-600">{errorModulos}</p>}
                       </Campo>
                       <Campo etiqueta="Periodo académico" t={t}>
                         <select value={sistema.periodo} onChange={(e) => { setSistema({ ...sistema, periodo: e.target.value }); setDescartar(false); }} className={`${entrada()} cursor-pointer`}>
@@ -666,6 +818,91 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
                       </Campo>
                     </div>
                   </Desplegable>
+
+                  {esAdministrador && (
+                    <section className={`space-y-3 rounded-xl border p-4 ${t.borde}`}>
+                      <div>
+                        <h3 className="text-sm font-bold">Administrar módulos</h3>
+                        <p className={`mt-0.5 text-xs ${t.suave}`}>
+                          Edita el nombre, número y horas requeridas sin cambiar los vínculos existentes.
+                        </p>
+                      </div>
+                      {errorModulos && <p role="alert" className="text-xs text-rose-600">{errorModulos}</p>}
+                      <ul className={`divide-y rounded-lg border ${t.borde}`}>
+                        {modulosDisponibles.map((modulo) => (
+                          <li key={modulo.id_modulo} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-semibold">
+                                {modulo.numero_modulo}. {normalizarNombreModulo(modulo.nombre_modulo)}
+                              </span>
+                              <span className={`text-[11px] ${t.suave}`}>{modulo.horas_requeridas} horas requeridas</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => editarModulo(modulo)}
+                              className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold ${t.borde} ${t.suave} hover:text-blue-600`}
+                            >
+                              Editar
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {moduloEditando && (
+                        <div className={`space-y-3 rounded-lg border p-3 ${t.borde}`}>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <Campo etiqueta="Número" t={t}>
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                required
+                                value={formModulo.numero_modulo}
+                                onChange={(e) => setFormModulo((actual) => ({ ...actual, numero_modulo: e.target.value }))}
+                                className={entrada()}
+                              />
+                            </Campo>
+                            <Campo etiqueta="Nombre del módulo" t={t}>
+                              <input
+                                value={formModulo.nombre_modulo}
+                                required
+                                onChange={(e) => setFormModulo((actual) => ({ ...actual, nombre_modulo: e.target.value }))}
+                                className={entrada()}
+                              />
+                            </Campo>
+                            <Campo etiqueta="Horas requeridas" t={t}>
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                required
+                                value={formModulo.horas_requeridas}
+                                onChange={(e) => setFormModulo((actual) => ({ ...actual, horas_requeridas: e.target.value }))}
+                                className={entrada()}
+                              />
+                            </Campo>
+                          </div>
+                          {errorGuardarModulo && <p role="alert" className="text-xs text-rose-600">{errorGuardarModulo}</p>}
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { setModuloEditando(null); setErrorGuardarModulo(''); }}
+                              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${t.borde} ${t.suave}`}
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void guardarModulo()}
+                              disabled={guardandoModulo || !formModulo.nombre_modulo.trim()}
+                              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {guardandoModulo ? 'Guardando...' : 'Guardar módulo'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  )}
 
                   <Desplegable
                     Icono={ListFilter}
@@ -803,8 +1040,8 @@ function Configuracion({ d, t, usuario, rolEtiqueta, modoTema, onTema, onGuardad
 /* ═════════════ Barra de navegación ═════════════ */
 function Navbar({
   darkMode, setDarkMode, usuario,
-  notificaciones = NOTIF_DEMO, buscarGlobal, onSeleccionarPersona,
-  onIrPerfil, onCerrarSesion, onVerExpediente,
+  notificaciones = [], buscarGlobal, onSeleccionarPersona,
+  onIrPerfil, onCambiarVista, onCerrarSesion, onVerExpediente, onOpenMenu,
 }) {
   const [usuarioActual, setUsuarioActual] = useState(() => leerUsuario(usuario));
   const [cambiosLocales, setCambiosLocales] = useState({});
@@ -837,9 +1074,42 @@ function Navbar({
 
   const [abierto, setAbierto] = useState(null);
   const [notifs, setNotifs] = useState(notificaciones);
+  const [notifsUsuario, setNotifsUsuario] = useState(String(usuarioActual?.id_usuario ?? usuarioActual?.id ?? ''));
+  const [cargandoNotifs, setCargandoNotifs] = useState(false);
+  const [errorNotifs, setErrorNotifs] = useState('');
+  const idUsuarioNotifs = usuarioActual?.id_usuario ?? usuarioActual?.id ?? '';
+  const solicitudNotificaciones = useRef(0);
+  const cargarNotificaciones = useCallback(async () => {
+    const solicitud = ++solicitudNotificaciones.current;
+    if (!idUsuarioNotifs) {
+      setCargandoNotifs(false);
+      return;
+    }
+
+    const usuarioSolicitante = String(idUsuarioNotifs);
+    setCargandoNotifs(true);
+    try {
+      const { data } = await api.get('/notificaciones');
+      if (solicitudNotificaciones.current !== solicitud) return;
+      setNotifs(Array.isArray(data?.data) ? data.data : []);
+      setNotifsUsuario(usuarioSolicitante);
+      setErrorNotifs('');
+    } catch (error) {
+      if (solicitudNotificaciones.current !== solicitud) return;
+      console.error('No se pudieron cargar las notificaciones:', error);
+      setNotifs([]);
+      setNotifsUsuario(usuarioSolicitante);
+      setErrorNotifs(error.response?.data?.message || 'No se pudieron cargar las notificaciones.');
+    } finally {
+      if (solicitudNotificaciones.current === solicitud) {
+        setCargandoNotifs(false);
+      }
+    }
+  }, [idUsuarioNotifs]);
   const [query, setQuery] = useState('');
   const [resultados, setResultados] = useState([]);
   const [buscando, setBuscando] = useState(false);
+  const [errorBusqueda, setErrorBusqueda] = useState('');
   const [activo, setActivo] = useState(0);
   const [filtroTipo, setFiltroTipo] = useState('todos');
   const [recientes, setRecientes] = useState(() => {
@@ -863,10 +1133,20 @@ function Navbar({
   const cambiarTema = (m) => {
     setModoTema(m);
     try { localStorage.setItem('tema_modo', m); } catch { /* ignorar */ }
+    window.dispatchEvent(new CustomEvent('tema_modo_cambiado', { detail: m }));
     if (m === 'luz') setDarkMode(false);
     else if (m === 'oscuro') setDarkMode(true);
     else setDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
   };
+  useEffect(() => {
+    const sincronizarTema = (event) => {
+      if (['luz', 'oscuro', 'sistema'].includes(event.detail)) {
+        setModoTema(event.detail);
+      }
+    };
+    window.addEventListener('tema_modo_cambiado', sincronizarTema);
+    return () => window.removeEventListener('tema_modo_cambiado', sincronizarTema);
+  }, []);
   useEffect(() => {
     if (modoTema !== 'sistema') return undefined;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -891,9 +1171,48 @@ function Navbar({
     return () => window.removeEventListener('preferencias_notif_cambiadas', actualizarPrefs);
   }, []);
 
-  const notifsVisibles = notifs.filter((n) => !n.categoria || preferencias[n.categoria] !== false);
+  useEffect(() => {
+    void cargarNotificaciones();
+  }, [cargarNotificaciones]);
+
+  useEffect(() => {
+    const abrirNotificaciones = () => {
+      setAbierto('notif');
+      invalidateApiCache('/notificaciones');
+      void cargarNotificaciones();
+    };
+    window.addEventListener('notificaciones:abrir', abrirNotificaciones);
+    return () => window.removeEventListener('notificaciones:abrir', abrirNotificaciones);
+  }, [cargarNotificaciones]);
+
+  useEffect(() => {
+    if (!idUsuarioNotifs) return undefined;
+    let vigente = true;
+    api.get('/notificaciones/preferencias')
+      .then(({ data }) => {
+        if (!vigente || !data || typeof data !== 'object') return;
+        const preferenciasActualizadas = { ...PREFS_DEFECTO, ...data };
+        setPreferencias(preferenciasActualizadas);
+        localStorage.setItem('preferencias_notificaciones', JSON.stringify(preferenciasActualizadas));
+      })
+      .catch((error) => {
+        console.error('No se pudieron cargar las preferencias de notificaciones:', error);
+      });
+    return () => { vigente = false; };
+  }, [idUsuarioNotifs]);
+
+  const notifsVisibles = (notifsUsuario === String(idUsuarioNotifs) ? notifs : [])
+    .filter((n) => !n.categoria || preferencias[n.categoria] !== false);
   const sinLeer = notifsVisibles.filter((n) => !n.leida).length;
   const alternar = (id) => setAbierto((a) => (a === id ? null : id));
+  const abrirNotificaciones = () => {
+    const abrir = abierto !== 'notif';
+    setAbierto(abrir ? 'notif' : null);
+    if (abrir) {
+      invalidateApiCache('/notificaciones');
+      void cargarNotificaciones();
+    }
+  };
 
   /* ---------- Búsqueda: alumnos y docentes a la vez, sin elegir atributo ---------- */
   const sinConsulta = query.trim().length < 2;
@@ -947,11 +1266,13 @@ function Navbar({
     const limpio = query.trim();
     if (limpio.length < 2) {
       setResultados([]);
+      setErrorBusqueda('');
       return undefined;
     }
 
     let vigente = true;
     setBuscando(true);
+    setErrorBusqueda('');
 
     const t = setTimeout(async () => {
       try {
@@ -965,18 +1286,21 @@ function Navbar({
           const r = await buscarGlobal(terminoReal);
           if (vigente) { setResultados(r || []); setActivo(0); setAbierto('buscar'); }
         } else {
-          const token = localStorage.getItem('token') || localStorage.getItem('access_token');
-          const res = await axios.get(`${API_URL}/buscar-global?q=${encodeURIComponent(terminoReal)}`, {
-            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          const { data } = await api.get('/buscar-global', {
+            params: { q: terminoReal },
           });
           if (vigente) {
-            setResultados(Array.isArray(res.data) ? res.data : []);
+            setResultados(Array.isArray(data) ? data : []);
             setActivo(0);
             setAbierto('buscar');
           }
         }
-      } catch {
-        if (vigente) setResultados([]);
+      } catch (error) {
+        console.error('No se pudo completar la búsqueda global:', error);
+        if (vigente) {
+          setResultados([]);
+          setErrorBusqueda('No se pudo completar la búsqueda. Intenta nuevamente.');
+        }
       } finally {
         if (vigente) setBuscando(false);
       }
@@ -1012,7 +1336,7 @@ function Navbar({
     setResultados([]);
     setAbierto(null);
     if (onVerExpediente) onVerExpediente(persona);
-    else window.dispatchEvent(new CustomEvent('abrir_expediente', { detail: persona }));
+    else window.dispatchEvent(new CustomEvent('expediente-alumno:abrir', { detail: persona }));
   };
 
   const alTeclearBuscador = (e) => {
@@ -1080,8 +1404,36 @@ function Navbar({
     else avisar('ok', 'Configuración guardada.');
   };
 
-  const marcarLeidas = () => setNotifs((l) => l.map((n) => ({ ...n, leida: true })));
-  const leerNotif = (id) => setNotifs((l) => l.map((n) => (n.id === id ? { ...n, leida: true } : n)));
+  const marcarLeidas = async () => {
+    try {
+      await api.post('/notificaciones/leer-todas');
+      invalidateApiCache('/notificaciones');
+      setNotifs((items) => items.map((item) => ({ ...item, leida: true })));
+      setErrorNotifs('');
+    } catch (error) {
+      console.error('No se pudieron marcar todas como leídas:', error);
+      setErrorNotifs(error.response?.data?.message || 'No se pudieron actualizar las notificaciones.');
+    }
+  };
+
+  const leerNotif = async (id) => {
+    try {
+      await api.patch(`/notificaciones/${encodeURIComponent(id)}/leer`);
+      invalidateApiCache('/notificaciones');
+      const notificacion = notifs.find((item) => item.id === id);
+      setNotifs((items) => items.map((item) => (
+        item.id === id ? { ...item, leida: true } : item
+      )));
+      setErrorNotifs('');
+      if (notificacion?.vista) {
+        setAbierto(null);
+        onCambiarVista?.(notificacion.vista);
+      }
+    } catch (error) {
+      console.error('No se pudo marcar la notificación como leída:', error);
+      setErrorNotifs(error.response?.data?.message || 'No se pudo actualizar la notificación.');
+    }
+  };
 
   /* ---------- Estilos según tema ---------- */
   const t = d
@@ -1110,7 +1462,7 @@ function Navbar({
 
   const panel = `nv-pop absolute top-full z-50 mt-2 overflow-hidden rounded-xl border shadow-xl ${t.panel}`;
   const fila = `flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-xs outline-none transition-colors ${t.hover} focus-visible:bg-blue-600/10`;
-  const botonIcono = `group relative grid h-10 w-10 cursor-pointer place-items-center rounded-xl border transition duration-150 active:scale-95 ${t.borde} ${t.icono} ${foco}`;
+  const botonIcono = `group relative grid h-9 w-9 cursor-pointer place-items-center rounded-xl border transition duration-150 active:scale-95 sm:h-10 sm:w-10 ${t.borde} ${t.icono} ${foco}`;
 
   const mostrandoAtributos = query.trim().length < 2;
 
@@ -1118,9 +1470,17 @@ function Navbar({
     <>
       <style>{ESTILOS}</style>
 
-      <header className={`nv-font relative z-40 flex h-[65px] select-none shadow-sm items-center justify-between gap-4 border-b px-4 transition-colors duration-200 sm:px-6 ${t.barra}`}>
+      <header className={`nv-font relative z-40 flex h-auto min-h-[65px] shrink-0 select-none items-center justify-between gap-2 border-b px-3 py-2 shadow-sm transition-colors duration-200 sm:h-[65px] sm:py-0 sm:gap-4 sm:px-5 ${t.barra}`}>
+        <button
+          type="button"
+          onClick={onOpenMenu}
+          aria-label="Abrir menú de navegación"
+          className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border lg:hidden ${t.borde} ${t.icono} ${foco}`}
+        >
+          <MenuIcon className="h-5 w-5" />
+        </button>
         {/* Buscador global */}
-        <div className="relative w-full max-w-md" data-menu>
+        <div className="relative min-w-0 w-full max-w-md flex-1" data-menu>
           <div className={`flex w-full items-center rounded-xl border px-3.5 py-2 transition focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-600/15 ${d ? 'border-[#1e335c] bg-[#0f172a] text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 focus-within:bg-white'}`}>
             <Search className={`mr-2.5 h-4 w-4 shrink-0 ${d ? 'text-blue-400' : 'text-slate-400'}`} />
             <input
@@ -1192,6 +1552,8 @@ function Navbar({
                 )
               ) : buscando ? (
                 <p className={`px-4 py-8 text-center text-xs ${t.suave}`}><Loader2 className="nv-spin mx-auto mb-2 h-4 w-4" /> Buscando coincidencias…</p>
+              ) : errorBusqueda ? (
+                <p role="alert" className="px-4 py-8 text-center text-xs text-rose-500">{errorBusqueda}</p>
               ) : lista.length === 0 ? (
                 <p className={`px-4 py-8 text-center text-xs ${t.suave}`}>No se encontraron {filtroTipo === 'alumno' ? 'alumnos' : filtroTipo === 'docente' ? 'docentes' : 'registros'} para "<b>{query}</b>"</p>
               ) : (
@@ -1228,7 +1590,7 @@ function Navbar({
         </div>
 
         {/* Controles de la derecha */}
-        <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2.5">
           {/* Tema */}
           <div role="group" aria-label="Tema" className={`relative hidden h-10 grid-cols-2 rounded-xl border p-0.5 sm:grid ${t.borde}`}>
             <span
@@ -1252,7 +1614,7 @@ function Navbar({
 
           {/* Notificaciones */}
           <div className="relative" data-menu>
-            <button onClick={() => alternar('notif')} className={botonIcono} aria-label={`Notificaciones${sinLeer ? `, ${sinLeer} sin leer` : ''}`} aria-haspopup="menu" aria-expanded={abierto === 'notif'} title="Notificaciones">
+            <button onClick={abrirNotificaciones} className={botonIcono} aria-label={`Notificaciones${sinLeer ? `, ${sinLeer} sin leer` : ''}`} aria-haspopup="menu" aria-expanded={abierto === 'notif'} title="Notificaciones">
               <Bell className={`h-4 w-4 ${d ? 'text-blue-400' : ''}`} />
               {sinLeer > 0 && (
                 <span className={`nv-pop absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full border-2 bg-blue-600 px-1 text-[9px] font-bold leading-none text-white ${d ? 'border-[#0b1b3a]' : 'border-white'}`}>
@@ -1262,7 +1624,7 @@ function Navbar({
             </button>
 
             {abierto === 'notif' && (
-              <div className={`${panel} right-0 w-80`}>
+              <div className={`${panel} right-0 w-[min(20rem,calc(100vw-1rem))]`}>
                 <div className={`flex items-center justify-between border-b px-4 py-3 ${t.borde}`}>
                   <span className="text-xs font-bold">Notificaciones {sinLeer > 0 && <span className="ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[9px] text-white">{sinLeer}</span>}</span>
                   {sinLeer > 0 && (
@@ -1272,7 +1634,9 @@ function Navbar({
                   )}
                 </div>
                 <div className={`max-h-72 divide-y overflow-y-auto ${t.linea}`}>
-                  {notifsVisibles.length === 0 && <p className={`px-4 py-8 text-center text-xs ${t.suave}`}>Sin notificaciones activas</p>}
+                  {errorNotifs && <p role="alert" className="px-4 py-3 text-center text-xs text-rose-500">{errorNotifs}</p>}
+                  {cargandoNotifs && notifsVisibles.length === 0 && <p className={`px-4 py-8 text-center text-xs ${t.suave}`}>Cargando notificaciones…</p>}
+                  {!cargandoNotifs && !errorNotifs && notifsVisibles.length === 0 && <p className={`px-4 py-8 text-center text-xs ${t.suave}`}>Sin notificaciones activas</p>}
                   {notifsVisibles.map((n, i) => {
                     const Ico = ICONO_CATEGORIA[n.categoria] || Bell;
                     return (
@@ -1330,7 +1694,7 @@ function Navbar({
             </button>
 
             {abierto === 'perfil' && (
-              <div role="menu" className={`${panel} right-0 w-64`}>
+              <div role="menu" className={`${panel} right-0 w-[min(16rem,calc(100vw-1rem))]`}>
                 <div className={`flex items-center gap-3 border-b px-4 py-3.5 ${t.borde}`}>
                   <img src={avatarUrl} alt="" onError={() => setErrorAvatar(true)} className="h-11 w-11 shrink-0 rounded-xl object-cover" />
                   <div className="min-w-0 leading-tight">
@@ -1370,7 +1734,11 @@ function Navbar({
           <div role="dialog" aria-modal="true" className={`nv-font nv-modal w-full max-w-md overflow-hidden rounded-2xl border shadow-2xl ${t.panel}`}>
             <div className={`flex items-center justify-between gap-3 border-b px-6 py-5 ${t.borde}`}>
               <div className="flex min-w-0 items-center gap-3.5">
-                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-blue-600/10 text-[14px] font-bold text-blue-600">{iniciales(nombreDe(personaSeleccionada) || 'U')}</span>
+                <AvatarEstudiante
+                  estudiante={personaSeleccionada}
+                  className="h-12 w-12 rounded-2xl text-[14px] font-bold"
+                  fallbackClassName={esAlumnoSel ? "bg-emerald-500/10 text-emerald-600" : "bg-blue-600/10 text-blue-600"}
+                />
                 <div className="min-w-0">
                   <h3 className="truncate text-[15px] font-bold">{nombreDe(personaSeleccionada) || 'Sin nombre'}</h3>
                   <span className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${esAlumnoSel ? 'bg-emerald-500/10 text-emerald-600' : 'bg-blue-600/10 text-blue-600'}`}>

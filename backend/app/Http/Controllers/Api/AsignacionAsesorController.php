@@ -10,6 +10,31 @@ use Illuminate\Support\Facades\Schema;
 
 class AsignacionAsesorController extends Controller
 {
+    private array $tablasExistentes = [];
+    private array $columnasPorTabla = [];
+
+    private function existeTabla(string $tabla): bool
+    {
+        if (!array_key_exists($tabla, $this->tablasExistentes)) {
+            $this->tablasExistentes[$tabla] = Schema::hasTable($tabla);
+        }
+
+        return $this->tablasExistentes[$tabla];
+    }
+
+    private function existeColumna(string $tabla, string $columna): bool
+    {
+        if (!$this->existeTabla($tabla)) {
+            return false;
+        }
+
+        if (!array_key_exists($tabla, $this->columnasPorTabla)) {
+            $this->columnasPorTabla[$tabla] = Schema::getColumnListing($tabla);
+        }
+
+        return in_array($columna, $this->columnasPorTabla[$tabla], true);
+    }
+
     private function verificarAdmin(Request $request)
     {
         $user = $request->user();
@@ -26,43 +51,40 @@ class AsignacionAsesorController extends Controller
 
     private function resolverIdsDocente($usuario): array
     {
-        $ids = array_filter([
-            $usuario->id_docente ?? null,
-            $usuario->id_usuario ?? null,
-            $usuario->id ?? null,
-        ], fn ($v) => !is_null($v) && $v !== '');
+        $idUsuario = $usuario->id_usuario ?? $usuario->id ?? null;
+        if ($idUsuario) {
+            return [(int) $idUsuario];
+        }
 
-        if (Schema::hasTable('docentes')) {
+        if (!empty($usuario->id_docente)) {
+            return [(int) $usuario->id_docente];
+        }
+
+        if ($this->existeTabla('docentes')) {
             $q = DB::table('docentes');
             $matched = false;
 
-            if (!empty($usuario->id_usuario) && Schema::hasColumn('docentes', 'id_usuario')) {
-                $q->where('id_usuario', $usuario->id_usuario);
-                $matched = true;
-            } elseif (!empty($usuario->id) && Schema::hasColumn('docentes', 'id_usuario')) {
-                $q->where('id_usuario', $usuario->id);
-                $matched = true;
-            } elseif (!empty($usuario->correo) && Schema::hasColumn('docentes', 'correo')) {
+            if (!empty($usuario->correo) && $this->existeColumna('docentes', 'correo')) {
                 $q->where('correo', $usuario->correo);
                 $matched = true;
-            } elseif (!empty($usuario->email) && Schema::hasColumn('docentes', 'email')) {
+            } elseif (!empty($usuario->email) && $this->existeColumna('docentes', 'email')) {
                 $q->where('email', $usuario->email);
                 $matched = true;
             }
 
             if ($matched) {
-                $docRows = $q->get();
-                foreach ($docRows as $d) {
-                    foreach (['id_docente', 'id', 'id_usuario'] as $col) {
-                        if (isset($d->$col) && !is_null($d->$col) && $d->$col !== '') {
-                            $ids[] = $d->$col;
-                        }
-                    }
-                }
+                $idColumna = collect(['id_usuario', 'id_docente', 'id'])
+                    ->first(fn ($columna) => $this->existeColumna('docentes', $columna));
+
+                return $idColumna
+                    ? $q->pluck($idColumna)->map(fn ($id) => (int) $id)->unique()->values()->all()
+                    : [];
             }
+
+            return [];
         }
 
-        return array_values(array_unique($ids));
+        return [];
     }
 
     /**
@@ -87,24 +109,29 @@ class AsignacionAsesorController extends Controller
         $query = DB::table('asignacion_asesores as a')
             ->join('estudiantes as e', 'e.id_estudiante', '=', 'a.id_estudiante');
 
-        if ($request->filled('id_docente')) {
+        if ($esAdmin && $request->filled('id_docente')) {
             $query->where('a.id_docente', (int) $request->id_docente);
-        } elseif (!$esAdmin && !empty($idsDocente)) {
+        } elseif (!$esAdmin && empty($idsDocente)) {
+            return response()->json(['success' => true, 'data' => []], 200);
+        } elseif (!$esAdmin) {
             $query->whereIn('a.id_docente', $idsDocente);
+            if ($request->filled('id_docente')) {
+                $query->where('a.id_docente', (int) $request->id_docente);
+            }
         }
 
         $tablaModulos = 'modulos_profesionales';
-        $colModId = Schema::hasTable($tablaModulos)
-            ? collect(['id_modulo', 'id'])->first(fn ($c) => Schema::hasColumn($tablaModulos, $c))
+        $colModId = $this->existeTabla($tablaModulos)
+            ? collect(['id_modulo', 'id'])->first(fn ($c) => $this->existeColumna($tablaModulos, $c))
             : null;
-        $colModNombre = Schema::hasTable($tablaModulos)
-            ? collect(['nombre', 'nombre_modulo', 'titulo', 'descripcion'])->first(fn ($c) => Schema::hasColumn($tablaModulos, $c))
+        $colModNombre = $this->existeTabla($tablaModulos)
+            ? collect(['nombre', 'nombre_modulo', 'titulo', 'descripcion'])->first(fn ($c) => $this->existeColumna($tablaModulos, $c))
             : null;
 
-        $tieneIdModulo = Schema::hasColumn('asignacion_asesores', 'id_modulo');
-        $tienePeriodo  = Schema::hasColumn('asignacion_asesores', 'periodo_academico');
-        $tieneIdDoc    = Schema::hasColumn('asignacion_asesores', 'id_docente');
-        $tienePkAsig   = Schema::hasColumn('asignacion_asesores', 'id_asignacion');
+        $tieneIdModulo = $this->existeColumna('asignacion_asesores', 'id_modulo');
+        $tienePeriodo  = $this->existeColumna('asignacion_asesores', 'periodo_academico');
+        $tieneIdDoc    = $this->existeColumna('asignacion_asesores', 'id_docente');
+        $tienePkAsig   = $this->existeColumna('asignacion_asesores', 'id_asignacion');
 
         $columnas = ['e.*'];
 
@@ -121,21 +148,22 @@ class AsignacionAsesorController extends Controller
             $columnas[] = 'a.periodo_academico';
         }
 
-        if (Schema::hasTable('docentes') && $tieneIdDoc) {
-            $docIdCol = collect(['id_docente', 'id'])->first(fn ($c) => Schema::hasColumn('docentes', $c));
+        if ($this->existeTabla('docentes') && $tieneIdDoc) {
+            $docIdCol = collect(['id_usuario', 'id_docente', 'id'])
+                ->first(fn ($c) => $this->existeColumna('docentes', $c));
             if ($docIdCol) {
                 $query->leftJoin('docentes as d', "d.$docIdCol", '=', 'a.id_docente');
                 $partesNombre = [];
-                if (Schema::hasColumn('docentes', 'nombres')) {
+                if ($this->existeColumna('docentes', 'nombres')) {
                     $partesNombre[] = 'COALESCE(d.nombres, \'\')';
                 }
-                if (Schema::hasColumn('docentes', 'apellidos')) {
+                if ($this->existeColumna('docentes', 'apellidos')) {
                     $partesNombre[] = 'COALESCE(d.apellidos, \'\')';
                 }
                 if (!empty($partesNombre)) {
                     $concatExpr = "TRIM(CONCAT_WS(' ', " . implode(', ', $partesNombre) . "))";
                     $columnas[] = DB::raw("NULLIF($concatExpr, '') as docente_nombre");
-                } elseif (Schema::hasColumn('docentes', 'nombre')) {
+                } elseif ($this->existeColumna('docentes', 'nombre')) {
                     $columnas[] = DB::raw('d.nombre as docente_nombre');
                 }
             }
@@ -149,36 +177,63 @@ class AsignacionAsesorController extends Controller
         }
 
         // Expediente separado por id_estudiante + id_modulo
-        if (Schema::hasTable('expediente_efsrt')) {
+        if ($this->existeTabla('expediente_efsrt')) {
             $query->leftJoin('expediente_efsrt as exp', function ($join) use ($tieneIdModulo) {
                 $join->on('exp.id_estudiante', '=', 'a.id_estudiante');
-                if ($tieneIdModulo && Schema::hasColumn('expediente_efsrt', 'id_modulo')) {
+                if ($tieneIdModulo && $this->existeColumna('expediente_efsrt', 'id_modulo')) {
                     $join->on('exp.id_modulo', '=', 'a.id_modulo');
                 }
             });
 
-            $expPk = collect(['id_expediente', 'id'])->first(fn ($c) => Schema::hasColumn('expediente_efsrt', $c));
+            $expPk = collect(['id_expediente', 'id'])->first(fn ($c) => $this->existeColumna('expediente_efsrt', $c));
             if ($expPk) {
                 $columnas[] = "exp.$expPk as id_expediente";
             }
-            if (Schema::hasColumn('expediente_efsrt', 'horas_acumuladas')) {
+            if ($this->existeColumna('expediente_efsrt', 'horas_acumuladas')) {
                 $columnas[] = DB::raw('COALESCE(exp.horas_acumuladas, 0) as horas_acumuladas');
             }
-            if (Schema::hasColumn('expediente_efsrt', 'estado_efsrt')) {
+            if ($this->existeColumna('expediente_efsrt', 'fecha_inicio')) {
+                $columnas[] = 'exp.fecha_inicio';
+            }
+            if ($this->existeColumna('expediente_efsrt', 'estado_efsrt')) {
                 $columnas[] = 'exp.estado_efsrt';
             }
-            if (Schema::hasColumn('expediente_efsrt', 'nota')) {
+            if ($this->existeColumna('expediente_efsrt', 'nota')) {
                 $columnas[] = 'exp.nota';
-            } elseif (Schema::hasColumn('expediente_efsrt', 'calificacion')) {
+            } elseif ($this->existeColumna('expediente_efsrt', 'calificacion')) {
                 $columnas[] = DB::raw('exp.calificacion as nota');
             }
+        }
 
-            if (Schema::hasTable('empresas_convenio') && Schema::hasColumn('expediente_efsrt', 'id_empresa')) {
-                $query->leftJoin('empresas_convenio as emp', 'emp.id_empresa', '=', 'exp.id_empresa');
-                $columnas[] = 'exp.id_empresa';
+        $tieneEmpresaExpediente = $this->existeTabla('expediente_efsrt')
+            && $this->existeColumna('expediente_efsrt', 'id_empresa');
+        $tieneEmpresaAsignacion = $this->existeColumna('asignacion_asesores', 'id_empresa');
+        if (
+            $this->existeTabla('empresas_convenio')
+            && ($tieneEmpresaExpediente || $tieneEmpresaAsignacion)
+        ) {
+            $empresaId = $tieneEmpresaExpediente && $tieneEmpresaAsignacion
+                ? 'COALESCE(exp.id_empresa, a.id_empresa)'
+                : ($tieneEmpresaExpediente ? 'exp.id_empresa' : 'a.id_empresa');
+            $query->leftJoin('empresas_convenio as emp', function ($join) use ($empresaId) {
+                $join->on('emp.id_empresa', '=', DB::raw($empresaId));
+            });
+            $columnas[] = DB::raw("$empresaId as id_empresa");
+            if ($this->existeColumna('empresas_convenio', 'razon_social')) {
                 $columnas[] = DB::raw('emp.razon_social as empresa_razon_social');
-                $columnas[] = 'emp.ruc';
-                $columnas[] = 'emp.estado_convenio';
+            }
+            foreach ([
+                'ruc',
+                'estado_convenio',
+                'telefono',
+                'correo_electronico',
+                'direccion',
+                'supervisor_empresa_nombre',
+                'supervisor_empresa_cargo',
+            ] as $columnaEmpresa) {
+                if ($this->existeColumna('empresas_convenio', $columnaEmpresa)) {
+                    $columnas[] = "emp.$columnaEmpresa";
+                }
             }
         }
 
@@ -195,7 +250,7 @@ class AsignacionAsesorController extends Controller
                     ->orWhere('e.nombres', 'ILIKE', $term)
                     ->orWhere('e.apellidos', 'ILIKE', $term);
 
-                if (Schema::hasColumn('estudiantes', 'correo')) {
+                if ($this->existeColumna('estudiantes', 'correo')) {
                     $sub->orWhere('e.correo', 'ILIKE', $term);
                 }
             });

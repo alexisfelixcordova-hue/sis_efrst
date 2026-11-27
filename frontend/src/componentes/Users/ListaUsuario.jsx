@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
+import api from '../../api/axios.js';
 
-const API_URL = 'http://localhost:8000/api';
 const BASE_URL = 'http://localhost:8000';
 const POR_PAGINA = 6;
 
@@ -264,8 +263,6 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
     const [usuarioActual, setUsuarioActual] = useState(leerUsuarioActual);
     const [confirmando, setConfirmando] = useState(null);
     const [eliminando, setEliminando] = useState(false);
-    const tokenSesion = localStorage.getItem('token');
-
     useEffect(() => {
         cargarUsuarios();
     }, []);
@@ -305,9 +302,7 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
 
     const cargarUsuarios = async () => {
         try {
-            const res = await axios.get(`${API_URL}/usuarios`, {
-                headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' }
-            });
+            const res = await api.get('/usuarios');
             const datosFinales = Array.isArray(res.data) ? res.data : (res.data.data || []);
             setUsuarios(datosFinales);
         } catch (error) {
@@ -342,9 +337,7 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
         }
         setEliminando(true);
         try {
-            await axios.delete(`${API_URL}/usuarios/${u.id_usuario}`, {
-                headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' }
-            });
+            await api.delete(`/usuarios/${u.id_usuario}`);
             mostrarAlerta('Usuario eliminado con éxito.', 'success');
             cargarUsuarios();
         } catch (error) {
@@ -471,7 +464,7 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
     ];
 
     return (
-        <div className="w-full p-5 md:p-6 space-y-6">
+        <div className="w-full min-w-0 max-w-full overflow-x-hidden space-y-6 p-3 sm:p-5 md:p-6">
             <style>{estilosAnimaciones}</style>
 
             {/* Cabecera */}

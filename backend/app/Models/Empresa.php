@@ -10,6 +10,7 @@ class Empresa extends Model
     use HasFactory;
 
     protected $table = 'empresas_convenio';
+
     protected $primaryKey = 'id_empresa';
 
     protected $fillable = [
@@ -21,7 +22,14 @@ class Empresa extends Model
         'documento_convenio_ruta',
         'telefono',
         'correo_electronico',
-        'direccion'
+        'direccion',
+        'estado',
+        'condicion',
+        'tipo_contribuyente',
+        'departamento',
+        'provincia',
+        'distrito',
+        'ubigeo',
     ];
 
     // Relación directa con expedientes

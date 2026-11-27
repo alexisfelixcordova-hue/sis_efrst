@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Plus, X, Search, Pin, Archive, Trash2, LayoutGrid, List, Copy, RotateCcw, Check,
   ListChecks, FileText, ArchiveRestore, Undo2, StickyNote, LayoutTemplate, Image as ImagenIcono,
 } from "lucide-react";
+import api, { invalidateApiCache } from "../../../api/axios.js";
 
 /* ───────────────────────── Categorías ─────────────────────────
    Cada categoría tiñe la tarjeta con un color suave. */
@@ -106,68 +107,6 @@ const alPegar = (e, fn) => {
   if (!f) return;
   e.preventDefault();
   comprimir(f).then(fn).catch(() => {});
-};
-
-/* Portadas de ejemplo dibujadas (sin necesitar internet) */
-const portada = (a, b) =>
-  `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 220'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${a}'/><stop offset='1' stop-color='${b}'/></linearGradient></defs><rect width='400' height='220' fill='url(#g)'/><circle cx='320' cy='60' r='70' fill='white' fill-opacity='.18'/><circle cx='90' cy='190' r='90' fill='white' fill-opacity='.12'/></svg>`,
-  )}`;
-
-/* ───────────────────────── Datos de ejemplo ───────────────────────── */
-const notasDemo = () => {
-  const ahora = Date.now();
-  const min = (n) => new Date(ahora - n * 60000).toISOString();
-  return [
-    {
-      id: "n1", titulo: "Puntos para la reunión con asesores", tipo: "lista", contenido: "", imagen: "",
-      items: [
-        { id: "i1", texto: "Presentar avance de horas acumuladas", hecho: true },
-        { id: "i2", texto: "Consultar formato final del informe", hecho: false },
-        { id: "i3", texto: "Pedir carta de presentación firmada", hecho: false },
-        { id: "i4", texto: "Confirmar fecha de la visita a la entidad", hecho: false },
-      ],
-      categoria: "Prácticas", fijada: true, estado: "activa", creada: min(60 * 26), editada: min(35),
-    },
-    {
-      id: "n2", titulo: "Bitácora de la semana 3", tipo: "texto", imagen: portada("#38bdf8", "#2563eb"),
-      contenido: "Se avanzó con la documentación del módulo de reportes. Se revisó la estructura de la base de datos y se acordó normalizar las tablas de usuarios.\n\nPendiente: validar los permisos por rol y subir las capturas al informe.",
-      items: [], categoria: "Bitácora", fijada: true, estado: "activa", creada: min(60 * 50), editada: min(60 * 5),
-    },
-    {
-      id: "n3", titulo: "Ideas para el sistema de asistencia", tipo: "texto", imagen: portada("#fbbf24", "#f97316"),
-      contenido: "- Registro por código QR\n- Reporte semanal en PDF\n- Alertas con dos faltas seguidas\n- Panel por asesor",
-      items: [], categoria: "Ideas", fijada: false, estado: "activa", creada: min(60 * 72), editada: min(60 * 30),
-    },
-    {
-      id: "n4", titulo: "Pendientes de la semana", tipo: "lista", contenido: "", imagen: "",
-      items: [
-        { id: "i5", texto: "Entregar bitácoras", hecho: true },
-        { id: "i6", texto: "Corregir informe parcial", hecho: true },
-        { id: "i7", texto: "Enviar correo a Tech Solutions Perú", hecho: false },
-        { id: "i8", texto: "Actualizar cronograma", hecho: false },
-      ],
-      categoria: "Pendiente", fijada: false, estado: "activa", creada: min(60 * 20), editada: min(60 * 2),
-    },
-    {
-      id: "n5", titulo: "Contacto en la entidad", tipo: "texto", imagen: "",
-      contenido: "Horario de atención: lunes a viernes, 8:00 a 17:00. Preguntar por el área de sistemas en el segundo piso.",
-      items: [], categoria: "General", fijada: false, estado: "activa", creada: min(60 * 100), editada: min(60 * 90),
-    },
-    {
-      id: "n6", titulo: "Borrador de conclusiones", tipo: "texto", imagen: "",
-      contenido: "Las prácticas permitieron aplicar lo aprendido en un entorno real, reforzando el trabajo en equipo.",
-      items: [], categoria: "Bitácora", fijada: false, estado: "archivada", creada: min(60 * 200), editada: min(60 * 120),
-    },
-  ];
-};
-
-const cargarNotas = () => {
-  try {
-    const g = JSON.parse(localStorage.getItem("notas_items"));
-    if (Array.isArray(g)) return g;
-  } catch { /* sin datos guardados */ }
-  return notasDemo();
 };
 
 const vacia = (extra = {}) => ({
@@ -836,7 +775,10 @@ export default function Notas({ darkMode }) {
   const d = !!darkMode;
   const t = tokens(d);
 
-  const [notas, setNotas] = useState(cargarNotas);
+  const [notas, setNotas] = useState([]);
+  const [datosCargados, setDatosCargados] = useState(false);
+  const [cargando, setCargando] = useState(true);
+  const [errorConexion, setErrorConexion] = useState("");
   const [vista, setVista] = useState("activa");
   const [cat, setCat] = useState("Todas");
   const [busqueda, setBusqueda] = useState("");
@@ -848,12 +790,47 @@ export default function Notas({ darkMode }) {
   const [confirmarVaciar, setConfirmarVaciar] = useState(false);
   const [galeria, setGaleria] = useState(false);
   const buscador = useRef(null);
+  const colaGuardado = useRef(Promise.resolve());
+
+  const cargarNotas = useCallback(async () => {
+    setCargando(true);
+    setErrorConexion("");
+    try {
+      const { data } = await api.get("/apps/notas");
+      setNotas(Array.isArray(data?.data) ? data.data : []);
+      setDatosCargados(true);
+    } catch (error) {
+      setErrorConexion(
+        error?.response?.data?.message || "No se pudieron cargar tus notas."
+      );
+    } finally {
+      setCargando(false);
+    }
+  }, []);
 
   /* ---------- Efectos ---------- */
   useEffect(() => {
-    try { localStorage.setItem("notas_items", JSON.stringify(notas)); }
-    catch { setToast({ texto: "No hay espacio para guardar. Prueba con imágenes más pequeñas.", deshacer: null }); }
-  }, [notas]);
+    void cargarNotas();
+  }, [cargarNotas]);
+
+  useEffect(() => {
+    if (!datosCargados) return undefined;
+    const id = setTimeout(() => {
+      colaGuardado.current = colaGuardado.current
+        .catch(() => undefined)
+        .then(() => api.put("/apps/notas", { datos: notas }))
+        .then(() => {
+          invalidateApiCache("/apps/notas");
+          setErrorConexion("");
+        })
+        .catch((error) => {
+          setErrorConexion(
+            error?.response?.data?.message || "No se pudieron guardar tus notas."
+          );
+        });
+    }, 500);
+    return () => clearTimeout(id);
+  }, [datosCargados, notas]);
 
   useEffect(() => {
     try { localStorage.setItem("notas_vista", cuadricula ? "grid" : "lista"); } catch { /* ignorar */ }
@@ -994,14 +971,39 @@ export default function Notas({ darkMode }) {
     papelera: { titulo: "La papelera está vacía", texto: "Las notas eliminadas se guardan aquí hasta que las borres para siempre." },
   }[vista];
 
+  if (cargando) {
+    return (
+      <div className={`grid min-h-64 place-items-center rounded-2xl border ${t.panel}`}>
+        <p className={t.suave}>Cargando tus notas...</p>
+      </div>
+    );
+  }
+
+  if (!datosCargados) {
+    return (
+      <div className={`mx-auto max-w-xl rounded-2xl border p-6 text-center ${t.panel}`}>
+        <p role="alert" className="font-semibold text-red-600">
+          {errorConexion || "No se pudo conectar con tus notas."}
+        </p>
+        <button
+          type="button"
+          onClick={() => void cargarNotas()}
+          className="mt-4 rounded-full bg-sky-600 px-4 py-2 font-semibold text-white hover:bg-sky-700"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className={`relative space-y-5 pb-24 text-xs ${d ? "text-gray-200" : "text-slate-900"}`}>
+    <div className={`relative min-w-0 max-w-full space-y-5 overflow-x-hidden pb-24 text-xs ${d ? "text-gray-200" : "text-slate-900"}`}>
       <style>{ESTILOS}</style>
       {/* Barra superior: solo lo esencial */}
       <header className="flex items-center gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-500/10 text-sky-500"><StickyNote size={20} /></span>
 
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search size={15} className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 ${t.suave}`} />
           <input
             ref={buscador}
@@ -1024,6 +1026,12 @@ export default function Notas({ darkMode }) {
           {cuadricula ? <List size={18} /> : <LayoutGrid size={18} />}
         </Icono>
       </header>
+
+      {errorConexion && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-red-700">
+          {errorConexion}
+        </p>
+      )}
 
       {vista === "activa" && (
         <Compositor d={d} t={t} categoriaInicial={categoriaActual()} onGuardar={crearRapida} onLista={nuevaLista} onPlantillas={() => setGaleria(true)} avisar={avisar} />

@@ -1,8 +1,6 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   ArrowLeft,
-  UserRound,
-  GraduationCap,
   Building2,
   ClipboardCheck,
   FileText,
@@ -13,33 +11,33 @@ import {
   Clock3,
   CircleAlert,
   Trash2,
-  Save,
   Award,
-  MessageSquare,
-  BookOpen,
   Target,
   X,
   ChevronRight,
+  ChevronDown,
   RefreshCw,
   Paperclip,
   Eye,
   LockKeyhole,
-  Send,
   Image as ImageIcon,
-  CheckSquare,
-  Square,
   UserCheck,
   FolderCheck,
-  ShieldCheck,
+  Check,
+  Info,
+  MoreVertical,
+  Users,
 } from "lucide-react";
+import {
+  publicarModuloSistema,
+  useModuloSistema,
+} from "../../../utils/moduloSistema";
 
-import api, { clearApiCache } from "../../../api/axios";
+import api, { invalidateApiCache } from "../../../api/axios";
 import {
   LS_REVISION_ESTUDIANTES,
   CACHE_REVISION_MEM,
   AvatarRevision,
-  EstadoEtiquetaRevision,
-  inputRevisionClass,
   obtenerClaveSesionRevision,
   leerStorageRevision,
   guardarStorageRevision,
@@ -125,6 +123,13 @@ const normalizarEstadoEv = (val) => {
   return "Pendiente";
 };
 
+const canonTexto = (txt = "") =>
+  String(txt || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
 const fechaActual = () => {
   const fecha = new Date();
   const local = new Date(
@@ -141,36 +146,202 @@ const calcularNota = (evaluacion) =>
 
 const formatoNota = (nota) => Number(nota || 0).toFixed(2);
 
-function Campo({ label, children }) {
+/* ───────────────────────── Estilo "Classroom" ─────────────────────────
+   Verde de acento, grises suaves, tarjetas con borde fino y campos rellenos.
+   Para cambiar el acento, edita los valores #188038 / #137333 / #e6f4ea. */
+const ESTILOS_RV = `
+@keyframes rvUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes rvPop { 0% { opacity: 0; transform: scale(.4) rotate(-14deg); } 60% { transform: scale(1.12) rotate(4deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes rvMenu { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes rvToast { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes rvBurst { 0% { opacity: 1; transform: translate(0,0) scale(1); } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(.4); } }
+@keyframes rvFade { from { opacity: 0; } to { opacity: 1; } }
+.rv-up { opacity: 0; animation: rvUp .4s cubic-bezier(.22,1,.36,1) forwards; }
+.rv-pop { animation: rvPop .5s cubic-bezier(.22,1,.36,1) both; }
+.rv-menu { animation: rvMenu .15s ease-out both; }
+.rv-toast { animation: rvToast .3s ease both; }
+.rv-fade { animation: rvFade .2s ease-out both; }
+.rv-burst { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; border-radius: 9999px; animation: rvBurst 1.2s ease-out forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .rv-up, .rv-pop, .rv-menu, .rv-toast, .rv-fade, .rv-burst { animation: none !important; opacity: 1 !important; }
+}
+`;
+
+const CORTOS = ["Cumplimiento", "Calidad", "Conocimientos", "Autonomía", "Equipo"];
+
+function useMontado(ms = 80) {
+  const [m, setM] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setM(true), ms);
+    return () => clearTimeout(t);
+  }, [ms]);
+  return m;
+}
+
+function AnilloNota({ nota, aprobado, size = 140 }) {
+  const montado = useMontado();
+  const r = 50;
+  const C = 2 * Math.PI * r;
+  const pct = Math.min(1, Math.max(0, Number(nota) / 20));
+  const rad = (((13 / 20) * 360 - 90) * Math.PI) / 180;
+  const x1 = 60 + Math.cos(rad) * (r - 7);
+  const y1 = 60 + Math.sin(rad) * (r - 7);
+  const x2 = 60 + Math.cos(rad) * (r + 7);
+  const y2 = 60 + Math.sin(rad) * (r + 7);
+  const color = aprobado ? "#188038" : Number(nota) > 0 ? "#1a73e8" : "#dadce0";
   return (
-    <label className="block space-y-1.5">
-      <span className="text-xs font-semibold text-slate-600">{label}</span>
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 120 120" className="h-full w-full">
+        <circle cx="60" cy="60" r={r} fill="none" stroke="currentColor" strokeWidth="9" className="opacity-10" />
+        <circle
+          cx="60" cy="60" r={r} fill="none" stroke={color} strokeWidth="9" strokeLinecap="round"
+          transform="rotate(-90 60 60)"
+          strokeDasharray={C}
+          strokeDashoffset={montado ? C - pct * C : C}
+          style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(.22,1,.36,1), stroke .4s" }}
+        />
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#f29900" strokeWidth="2.5" strokeLinecap="round" />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-3xl font-medium tabular-nums leading-none">{formatoNota(nota)}</span>
+        <span className="mt-1 text-[10px] opacity-60">de 20 · mín. 13</span>
+      </div>
+    </div>
+  );
+}
+
+function RadarCriterios({ valores }) {
+  const montado = useMontado(150);
+  const n = valores.length;
+  const c = 110;
+  const R = 74;
+  const pt = (i, v) => {
+    const a = ((-90 + (i * 360) / n) * Math.PI) / 180;
+    return [c + Math.cos(a) * R * v, c + Math.sin(a) * R * v];
+  };
+  const poly = (v) => valores.map((_, i) => pt(i, v).join(",")).join(" ");
+  const datos = valores.map((v, i) => pt(i, v / 4).join(",")).join(" ");
+  return (
+    <svg viewBox="0 0 220 220" className="mx-auto w-full max-w-[260px]">
+      {[0.25, 0.5, 0.75, 1].map((k) => (
+        <polygon key={k} points={poly(k)} fill="none" stroke="currentColor" strokeWidth="1" className="opacity-15" />
+      ))}
+      {valores.map((_, i) => {
+        const [x, y] = pt(i, 1);
+        return <line key={i} x1={c} y1={c} x2={x} y2={y} stroke="currentColor" className="opacity-10" />;
+      })}
+      <g
+        style={{
+          transformOrigin: `${c}px ${c}px`,
+          transform: montado ? "scale(1)" : "scale(.05)",
+          opacity: montado ? 1 : 0,
+          transition: "transform 1s cubic-bezier(.22,1,.36,1), opacity .6s",
+        }}
+      >
+        <polygon points={datos} fill="rgba(24,128,56,.16)" stroke="#188038" strokeWidth="2" strokeLinejoin="round" />
+        {valores.map((v, i) => {
+          const [x, y] = pt(i, v / 4);
+          return <circle key={i} cx={x} cy={y} r="3.5" fill="#188038" />;
+        })}
+      </g>
+      {valores.map((_, i) => {
+        const [x, y] = pt(i, 1.2);
+        return (
+          <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize="8.5" fill="currentColor" className="opacity-60" fontWeight="600">
+            {CORTOS[i]}
+          </text>
+        );
+      })}
+    </svg>
+  );
+}
+
+/* Campo relleno con etiqueta flotante (como los de Classroom) */
+function CampoRelleno({ etiqueta, children, k }) {
+  return (
+    <label className={`block rounded-t-md border-b-2 px-4 pb-2 pt-2 transition-colors focus-within:border-[#188038] ${k.relleno} ${k.lineaCampo}`}>
+      <span className={`block text-xs ${k.suave}`}>{etiqueta}</span>
       {children}
     </label>
   );
 }
+
+/* Menú de tres puntos (Editar / Eliminar / …) */
+function Kebab({ id, abierto, setAbierto, items, k, etiqueta = "Más opciones" }) {
+  return (
+    <div className="relative" data-kebab>
+      <button
+        type="button"
+        aria-label={etiqueta}
+        aria-haspopup="menu"
+        aria-expanded={abierto === id}
+        onClick={(e) => { e.stopPropagation(); setAbierto(abierto === id ? null : id); }}
+        className={`grid h-9 w-9 place-items-center rounded-full transition ${k.hover} ${abierto === id ? k.relleno : ""}`}
+      >
+        <MoreVertical size={18} />
+      </button>
+      {abierto === id && (
+        <div role="menu" className={`rv-menu absolute right-0 z-40 mt-1 w-56 rounded-md border py-2 shadow-lg ${k.tarjeta}`}>
+          {items.map((it, i) =>
+            it === "---" ? (
+              <div key={`sep-${i}`} className={`my-2 border-t ${k.borde}`} />
+            ) : (
+              <button
+                key={it.t}
+                type="button"
+                role="menuitem"
+                disabled={it.off}
+                onClick={(e) => { e.stopPropagation(); setAbierto(null); it.fn(); }}
+                className={`block w-full px-4 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${k.hover} ${it.peligro ? "text-[#d93025]" : ""}`}
+              >
+                {it.t}
+              </button>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const colorEstadoEv = (estado, oscuro) => {
+  const c = {
+    Aprobado: oscuro ? "text-[#81c995]" : "text-[#188038]",
+    Observado: oscuro ? "text-[#f28b82]" : "text-[#d93025]",
+    "En revisión": oscuro ? "text-[#8ab4f8]" : "text-[#1a73e8]",
+    Pendiente: oscuro ? "text-[#9aa0a6]" : "text-[#5f6368]",
+  };
+  return c[estado] || c.Pendiente;
+};
 
 export default function DetalleRevisionEstudiante({
   estudiante,
   setEstudiantes,
   onVolver,
   onGuardadoExitoso,
-  setVista,
   darkMode = false,
 }) {
   const claveSesion = useMemo(() => obtenerClaveSesionRevision(), []);
   const keyEstudiantes = `${LS_REVISION_ESTUDIANTES}_${claveSesion}`;
   const keyEvidencias = `${LS_EVIDENCIAS}_${claveSesion}`;
+  const moduloSistema = useModuloSistema();
 
   const modulosEstudiante = useMemo(() => {
     if (Array.isArray(estudiante?.modulos) && estudiante.modulos.length > 0) {
       return estudiante.modulos;
     }
-    return [1, 2, 3].map((num) => ({
-      id_modulo: num,
-      numero_modulo: num,
+    const idModulo = estudiante?.id_modulo ?? estudiante?.moduloId ?? null;
+    const numeroModulo = Number(
+      estudiante?.numeroModuloInicial ?? estudiante?.numero_modulo ?? idModulo
+    );
+    const nombreModulo =
+      estudiante?.nombre_modulo || estudiante?.modulo_nombre || estudiante?.modulo;
+    if (idModulo === null || !nombreModulo) return [];
+    return [{
+      id_modulo: idModulo,
+      numero_modulo: Number.isFinite(numeroModulo) ? numeroModulo : idModulo,
       id_expediente: estudiante?.idExpediente ?? null,
-      nombre_modulo: `Módulo ${ROMANOS[num - 1]}`,
+      nombre_modulo: nombreModulo,
       docente_asignado: estudiante?.docenteAsignado || "Docente asignado",
       id_docente_asesor: null,
       empresa: estudiante?.empresa || "Empresa no registrada",
@@ -182,11 +353,17 @@ export default function DetalleRevisionEstudiante({
       nota: estudiante?.nota ?? null,
       comentario: estudiante?.comentario || "",
       adjuntado: Boolean(estudiante?.adjuntado),
-    }));
+    }];
   }, [estudiante]);
 
   const [numeroModuloActivo, setNumeroModuloActivo] = useState(
-    () => Number(estudiante?.numeroModuloInicial || 1)
+    () =>
+      Number(
+        estudiante?.numeroModuloInicial ||
+          moduloSistema?.numero_modulo ||
+          estudiante?.modulos?.[0]?.numero_modulo ||
+          1
+      )
   );
   const [seccion, setSeccion] = useState("evaluacion");
   const [cargandoEvBD, setCargandoEvBD] = useState(false);
@@ -198,6 +375,18 @@ export default function DetalleRevisionEstudiante({
       ) || modulosEstudiante[0],
     [modulosEstudiante, numeroModuloActivo]
   );
+
+  useEffect(() => {
+    if (!moduloSistema?.id_modulo) return;
+    const asignado = modulosEstudiante.find(
+      (modulo) =>
+        String(modulo.id_modulo) === String(moduloSistema.id_modulo)
+    );
+    if (asignado) {
+      setNumeroModuloActivo(Number(asignado.numero_modulo));
+      setAviso(null);
+    }
+  }, [moduloSistema, modulosEstudiante]);
 
   const claveModulo = `${estudiante.estudianteId}-m${moduloActivo.numero_modulo}`;
 
@@ -222,19 +411,22 @@ export default function DetalleRevisionEstudiante({
   const [guardando, setGuardando] = useState(false);
   const [aviso, setAviso] = useState(null);
   const [filtroEvidencia, setFiltroEvidencia] = useState("Todas");
-
-  const surface = darkMode
-    ? "border-slate-700 bg-slate-900 text-slate-100"
-    : "border-slate-200 bg-white text-slate-800";
-  const muted = darkMode ? "text-slate-400" : "text-slate-500";
-  const fondo = darkMode
-    ? "bg-slate-950 text-slate-100"
-    : "bg-[#f6f8fc] text-slate-800";
+  const [evAbierta, setEvAbierta] = useState(null);
+  const [menuAbierto, setMenuAbierto] = useState(null);
 
   const mostrarAviso = (tipo, mensaje) => {
     setAviso({ tipo, mensaje });
     window.setTimeout(() => setAviso(null), 4500);
   };
+
+  // Cierra los menús de tres puntos al hacer clic fuera
+  useEffect(() => {
+    const fuera = (e) => {
+      if (!e.target.closest("[data-kebab]")) setMenuAbierto(null);
+    };
+    document.addEventListener("mousedown", fuera);
+    return () => document.removeEventListener("mousedown", fuera);
+  }, []);
 
   useEffect(() => {
     setNumeroModuloActivo(Number(estudiante?.numeroModuloInicial || 1));
@@ -344,7 +536,64 @@ export default function DetalleRevisionEstudiante({
           }))
         : [];
 
-      const combinadas = [...registrosBD, ...listaEval];
+      const storeEvalGlobal = leerStorageRevision(`ev_efsrt_evals_${claveSesion}`, {});
+      const dniEst = String(estudiante.dni || "").trim();
+      const idEstStr = String(estudiante.estudianteId ?? "");
+      const modCanonAct = canonTexto(moduloActivo.nombre_modulo);
+      const romanoMod = ROMANOS[Number(moduloActivo.numero_modulo) - 1]?.toLowerCase() || "";
+
+      const listaDesdeEvaluacionEvidencias = Object.entries(storeEvalGlobal || {})
+        .filter(([claveStr, val]) => {
+          const mismaPersona =
+            String(val?.id_estudiante ?? "") === idEstStr ||
+            (dniEst && dniEst !== "Sin DNI" && String(val?.dni || "").trim() === dniEst) ||
+            claveStr.startsWith(`id:${idEstStr}|`) ||
+            (dniEst && dniEst !== "Sin DNI" && claveStr.startsWith(`dni:${dniEst}|`));
+          if (!mismaPersona) return false;
+
+          const modValCanon = canonTexto(val?.modulo_key || val?.modulo_nombre || "");
+          if (!modValCanon || modValCanon === "general") return true;
+          if (modCanonAct && (modCanonAct.includes(modValCanon) || modValCanon.includes(modCanonAct))) {
+            return true;
+          }
+          if (romanoMod && new RegExp(`\\b${romanoMod}\\b`, "i").test(modValCanon)) {
+            return true;
+          }
+          return false;
+        })
+        .map(([claveStr, val], idx) => {
+          const archs = Array.isArray(val?.archivosBD)
+            ? val.archivosBD.map((a, i) => ({
+                id: a.id || `ev-conn-${idx}-${i}`,
+                name: a.name || `evidencia_${i + 1}`,
+                url: a.url || "",
+                esFoto: Boolean(a.esFoto || esImagen(a.name || a.url || "")),
+                seleccionada: a.seleccionada !== false,
+              }))
+            : [];
+          return {
+            id: String(val?.id_evidencia || `ev-conn-${claveStr}-${idx}`),
+            titulo: val?.tipo || `Evidencia ${idx + 1}`,
+            descripcion:
+              val?.comentario ||
+              (val?.calificacion !== "" && val?.calificacion !== undefined
+                ? `Calificación: ${val.calificacion}/20`
+                : "Registrada en Evaluación y Evidencias EFSRT"),
+            fechaLimite: "",
+            estado: normalizarEstadoEv(val?.estado),
+            archivo: archs[0]?.url || "",
+            archivos: archs,
+            fechaCreacion: val?.fecha || fechaActual(),
+            seleccionada: true,
+            desdeBD: true,
+          };
+        });
+
+      const combinadas = [
+        ...registrosBD,
+        ...listaEval,
+        ...listaDesdeEvaluacionEvidencias,
+      ];
 
       if (combinadas.length > 0) {
         const normalizadas = combinadas.map((row, idx) => {
@@ -431,7 +680,7 @@ export default function DetalleRevisionEstudiante({
     } finally {
       setCargandoEvBD(false);
     }
-  }, [estudiante, moduloActivo, claveModulo, keyEvidencias]);
+  }, [estudiante, moduloActivo, claveModulo, keyEvidencias, claveSesion]);
 
   useEffect(() => {
     cargarEvidenciasDeModulo();
@@ -555,6 +804,23 @@ export default function DetalleRevisionEstudiante({
         e.id === id ? { ...e, seleccionada: !(e.seleccionada !== false) } : e
       ),
     }));
+  };
+
+  const conectarEvidenciasAlHacerClick = async (destinoSeccion = "evidencias") => {
+    await cargarEvidenciasDeModulo();
+    setEvidencias((prev) => {
+      const lista = prev[claveModulo] || [];
+      if (lista.length === 0) return prev;
+      const tieneAlguna = lista.some((e) => e.seleccionada !== false);
+      if (tieneAlguna) return prev;
+      return {
+        ...prev,
+        [claveModulo]: lista.map((e) => ({ ...e, seleccionada: true })),
+      };
+    });
+    if (destinoSeccion) {
+      setSeccion(destinoSeccion);
+    }
   };
 
   const adjuntarArchivosAEvidencia = (evId, fileList) => {
@@ -766,7 +1032,9 @@ export default function DetalleRevisionEstudiante({
         return actualizados;
       });
 
-      clearApiCache();
+      invalidateApiCache("/expedientes");
+      invalidateApiCache("/efsrt");
+      invalidateApiCache("/evidencias-efsrt");
       window.dispatchEvent(new Event("expediente:actualizado"));
       window.dispatchEvent(new Event("revision:actualizada"));
 
@@ -812,976 +1080,993 @@ export default function DetalleRevisionEstudiante({
     },
   ];
 
+  const pasos = [
+    {
+      id: "nota",
+      titulo: "Nota aprobatoria",
+      detalle: `${formatoNota(notaCalculada)} · mín. 13`,
+      ok: notaAprobatoria,
+      ir: "evaluacion",
+      icono: Target,
+    },
+    {
+      id: "evid",
+      titulo: "Evidencia elegida",
+      detalle: `${evidenciasElegidas.length} elegidas`,
+      ok: tieneEvidencias,
+      ir: "evidencias",
+      conectar: true,
+      icono: FileText,
+    },
+    {
+      id: "port",
+      titulo: "Portafolio conforme",
+      detalle: estadoPortafolioActual,
+      ok: portafolioConforme,
+      ir: null,
+      icono: FolderCheck,
+    },
+    {
+      id: "verif",
+      titulo: "Verificado por docente",
+      detalle: verificadoDocenteActual ? "Confirmado" : "Pendiente",
+      ok: verificadoDocenteActual,
+      ir: "evaluacion",
+      icono: UserCheck,
+    },
+  ];
+  const okCount = pasos.filter((p) => p.ok).length;
+  const pctHoras = Math.min(
+    100,
+    Math.round(
+      (horasAcumuladasActuales / Math.max(1, horasRequeridasActuales)) * 100
+    )
+  );
+  const valoresRadar = CRITERIOS.map((c) => Number(evaluacionActual[c.id] || 0));
+  const evidenciasVisibles = tareasActuales.filter(
+    (e) => filtroEvidencia === "Todas" || e.estado === filtroEvidencia
+  );
+  const contarEstadoEv = (estado) =>
+    estado === "Todas"
+      ? tareasActuales.length
+      : tareasActuales.filter((e) => e.estado === estado).length;
+
+  const [celebrar, setCelebrar] = useState(false);
+  const listoPrevio = useRef(listoParaConstancia);
+  useEffect(() => {
+    if (!listoPrevio.current && listoParaConstancia) {
+      setCelebrar(true);
+      const t = setTimeout(() => setCelebrar(false), 1800);
+      listoPrevio.current = true;
+      return () => clearTimeout(t);
+    }
+    listoPrevio.current = listoParaConstancia;
+  }, [listoParaConstancia, claveModulo]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = document.activeElement?.tagName;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || modalEvidencia) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const i = Number(e.key) - 1;
+      if (i >= 0 && i < secciones.length) {
+        const targetSec = secciones[i].id;
+        if (targetSec === "evidencias") {
+          conectarEvidenciasAlHacerClick("evidencias");
+        } else {
+          setSeccion(targetSec);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalEvidencia, claveModulo]);
+
+  const diasPara = (fecha) => {
+    if (!fecha) return null;
+    const d = new Date(`${fecha}T23:59:59`);
+    if (Number.isNaN(d.getTime())) return null;
+    return Math.ceil((d.getTime() - Date.now()) / 86400000);
+  };
+
+  /* ───────────────────────── Apoyos de la vista ───────────────────────── */
+  const marcarTodas = (campo, valor) =>
+    setEvidencias((prev) => ({
+      ...prev,
+      [claveModulo]: (prev[claveModulo] || []).map((e) => ({ ...e, [campo]: valor })),
+    }));
+
+  // Niveles ya evaluados de cada módulo (el activo en vivo; los demás, lo guardado en el expediente)
+  const nivelesPorModulo = useMemo(() => {
+    const mapa = {};
+    modulosEstudiante.forEach((m) => {
+      const num = Number(m.numero_modulo);
+      const esActivo = num === Number(moduloActivo.numero_modulo);
+      const vivo = evaluaciones[claveModulo] || {};
+      let niveles = {};
+      if (esActivo && Object.keys(vivo).length > 0) {
+        niveles = vivo;
+      } else {
+        const guardado = leerStorageRevision(
+          `expediente_calificacion_${estudiante.estudianteId}_m${num}`,
+          null
+        );
+        if (Array.isArray(guardado?.detalle_evaluacion)) {
+          CRITERIOS.forEach((c) => {
+            const f = guardado.detalle_evaluacion.find((x) => x.criterio === c.nombre);
+            if (f) niveles[c.id] = Number(f.nivel);
+          });
+        }
+      }
+      mapa[num] = niveles;
+    });
+    return mapa;
+  }, [modulosEstudiante, moduloActivo, evaluaciones, claveModulo, estudiante.estudianteId, moduloYaCalificado]);
+
+  const notaDeModulo = (m) => {
+    const esActivo = Number(m.numero_modulo) === Number(moduloActivo.numero_modulo);
+    if (esActivo && criteriosCompletados > 0) return notaCalculada;
+    return m.nota !== null && m.nota !== undefined ? Number(m.nota) : null;
+  };
+
+  const elegirModulo = (num) => {
+    setNumeroModuloActivo(Number(num));
+    setAviso(null);
+    const elegido = modulosEstudiante.find(
+      (modulo) => Number(modulo.numero_modulo) === Number(num)
+    );
+    if (elegido) publicarModuloSistema(elegido);
+  };
+
+  /* ───────────────────────── Tokens de color ───────────────────────── */
+  const k = darkMode
+    ? {
+        pagina: "bg-[#202124] text-[#e8eaed]",
+        tarjeta: "bg-[#292a2d] border-[#3c4043]",
+        borde: "border-[#3c4043]",
+        suave: "text-[#9aa0a6]",
+        relleno: "bg-[#303134]",
+        hover: "hover:bg-[#35363a]",
+        lineaCampo: "border-[#5f6368]",
+        acento: "text-[#81c995]",
+        acentoBg: "bg-[#81c995] text-[#202124]",
+        barra: "bg-[#81c995]",
+        seleccion: "border-[#81c995] bg-[#1e3a29] ring-1 ring-[#81c995]",
+        inp: "text-[#e8eaed] placeholder:text-[#9aa0a6]",
+      }
+    : {
+        pagina: "bg-white text-[#202124]",
+        tarjeta: "bg-white border-[#dadce0]",
+        borde: "border-[#dadce0]",
+        suave: "text-[#5f6368]",
+        relleno: "bg-[#f1f3f4]",
+        hover: "hover:bg-[#f1f3f4]",
+        lineaCampo: "border-[#80868b]",
+        acento: "text-[#188038]",
+        acentoBg: "bg-[#188038] text-white",
+        barra: "bg-[#188038]",
+        seleccion: "border-[#188038] bg-[#e6f4ea] ring-1 ring-[#188038]",
+        inp: "text-[#202124] placeholder:text-[#80868b]",
+      };
+
+  const inpBase = `w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70 ${k.inp}`;
+  const puedeGuardar =
+    !guardando && !moduloYaCalificado && criteriosCompletados === CRITERIOS.length;
+  const faltanCriterios = CRITERIOS.length - criteriosCompletados;
+
+  const tituloBoton = guardando
+    ? "Guardando…"
+    : moduloYaCalificado
+      ? "Evaluación registrada"
+      : "Registrar en expediente";
+
+  const accionesMasivas = [
+    { t: "Elegir todas las evidencias", fn: () => marcarTodas("seleccionada", true), off: tareasActuales.length === 0 },
+    { t: "Quitar la selección", fn: () => marcarTodas("seleccionada", false), off: tareasActuales.length === 0 },
+    "---",
+    { t: "Aprobar todas", fn: () => marcarTodas("estado", "Aprobado"), off: tareasActuales.length === 0 || moduloYaCalificado },
+    { t: "Marcar todas como pendientes", fn: () => marcarTodas("estado", "Pendiente"), off: tareasActuales.length === 0 || moduloYaCalificado },
+    "---",
+    { t: "Recargar desde el servidor", fn: cargarEvidenciasDeModulo },
+  ];
+
+  /* ───────────────────────── Vista ───────────────────────── */
   return (
-    <div className={`min-h-full w-full ${fondo} p-3 sm:p-5`}>
-      <div className="mx-auto w-full max-w-[1500px] space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div
+      className={`min-h-full w-full ${k.pagina}`}
+      style={{ fontFamily: "'Google Sans','Product Sans',Roboto,'Plus Jakarta Sans',system-ui,sans-serif" }}
+    >
+      <style>{ESTILOS_RV}</style>
+
+      {/* Aviso (estilo snackbar de Classroom) */}
+      {aviso && (
+        <div
+          role="status"
+          className="rv-toast fixed bottom-5 left-5 z-[60] flex max-w-md items-center gap-3 rounded bg-[#323232] px-4 py-3 text-sm text-white shadow-xl"
+        >
+          {aviso.tipo === "ok" ? (
+            <CheckCircle2 size={18} className="shrink-0 text-[#81c995]" />
+          ) : (
+            <CircleAlert size={18} className="shrink-0 text-[#f28b82]" />
+          )}
+          <span className="leading-snug">{aviso.mensaje}</span>
+          <button type="button" aria-label="Cerrar aviso" onClick={() => setAviso(null)} className="ml-2 shrink-0 text-[#9aa0a6] hover:text-white">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* Barra superior + pestañas */}
+      <header className={`sticky top-0 z-30 border-b ${k.borde} ${k.pagina}`}>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 sm:px-4">
           <button
             type="button"
             onClick={onVolver}
-            className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-blue-600"
+            aria-label="Volver"
+            title="Volver"
+            className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition ${k.hover}`}
           >
-            <ArrowLeft size={18} />
-            Volver a estudiantes a revisión
+            <ArrowLeft size={20} />
           </button>
 
-          {setVista && (
+          <div className="min-w-0 leading-tight">
+            <p className="max-w-[320px] truncate text-[15px] font-medium">{estudiante.nombre}</p>
+            <p className={`max-w-[320px] truncate text-xs ${k.suave}`}>
+              {moduloActivo.nombre_modulo} · {estudiante.expediente}
+            </p>
+          </div>
+
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <span className="relative">
+              {celebrar &&
+                Array.from({ length: 16 }).map((_, i) => {
+                  const ang = (i / 16) * Math.PI * 2;
+                  return (
+                    <span
+                      key={i}
+                      className="rv-burst"
+                      style={{
+                        background: ["#188038", "#1a73e8", "#f29900", "#a142f4"][i % 4],
+                        "--dx": `${Math.cos(ang) * 46}px`,
+                        "--dy": `${Math.sin(ang) * 46}px`,
+                      }}
+                    />
+                  );
+                })}
+              {listoParaConstancia ? (
+                <span key="listo" className="rv-pop inline-flex items-center gap-1.5 rounded-full bg-[#e6f4ea] px-3 py-1.5 text-xs font-medium text-[#137333]">
+                  Listo para constancia
+                </span>
+              ) : (
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs ${k.relleno} ${k.suave}`}>
+                  {pasos.length - okCount} requisitos pendientes
+                </span>
+              )}
+            </span>
+
             <button
               type="button"
-              onClick={() => setVista("Dashboard")}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              onClick={guardarCalificacion}
+              disabled={!puedeGuardar}
+              title={
+                moduloYaCalificado
+                  ? "Esta evaluación ya fue adjuntada al expediente"
+                  : faltanCriterios > 0
+                    ? `Faltan ${faltanCriterios} criterio(s) por evaluar`
+                    : "Registrar la evaluación en el expediente"
+              }
+              className={`inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-medium transition ${
+                puedeGuardar
+                  ? "bg-[#188038] text-white hover:bg-[#137333] hover:shadow-md"
+                  : `${k.relleno} ${k.suave} cursor-not-allowed`
+              }`}
             >
-              Dashboard
+              {guardando && <RefreshCw className="animate-spin" size={16} />}
+              {tituloBoton}
             </button>
-          )}
+          </div>
         </div>
 
-        {aviso && (
-          <div
-            className={`flex items-center gap-2 rounded-xl border p-3 text-sm ${
-              aviso.tipo === "ok"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
-          >
-            {aviso.tipo === "ok" ? (
-              <CheckCircle2 size={18} />
-            ) : (
-              <CircleAlert size={18} />
-            )}
-            {aviso.mensaje}
-          </div>
-        )}
-
-        <section className={`rounded-2xl border p-4 shadow-sm ${surface}`}>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-bold">
-                Módulos EFSRT del estudiante y docente asignado
-              </h2>
-              <p className={`text-xs ${muted}`}>
-                Cada módulo es distinto al expediente: revisa empresa, horas, portafolio, evidencias y verifica antes de pasar a constancia.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
-            {modulosEstudiante.map((mod) => {
-              const esActivo =
-                Number(mod.numero_modulo) === Number(moduloActivo.numero_modulo);
-              return (
-                <button
-                  key={mod.numero_modulo}
-                  type="button"
-                  onClick={() => {
-                    setNumeroModuloActivo(mod.numero_modulo);
-                    setSeccion("evaluacion");
-                    setAviso(null);
-                  }}
-                  className={`rounded-xl border p-3 text-left transition ${
-                    esActivo
-                      ? "border-blue-500 bg-blue-50/70 ring-2 ring-blue-500/15"
-                      : "border-slate-200 bg-white hover:border-blue-300"
+        <div role="tablist" aria-label="Secciones" className="flex gap-1 overflow-x-auto px-2 sm:px-4">
+          {secciones.map((item) => {
+            const activa = seccion === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={activa}
+                onClick={() =>
+                  item.id === "evidencias"
+                    ? conectarEvidenciasAlHacerClick("evidencias")
+                    : setSeccion(item.id)
+                }
+                className={`relative flex shrink-0 items-center gap-2 px-5 py-3.5 text-sm font-medium transition-colors ${
+                  activa ? k.acento : `${k.suave} hover:text-current`
+                }`}
+              >
+                {item.nombre}
+                {item.id === "evidencias" && (
+                  <span className={`rounded-full px-1.5 text-[11px] ${k.relleno}`}>
+                    {evidenciasElegidas.length}/{tareasActuales.length}
+                  </span>
+                )}
+                <span
+                  className={`absolute inset-x-3 bottom-0 h-[3px] origin-center rounded-t-full transition-transform duration-200 ${k.barra} ${
+                    activa ? "scale-x-100" : "scale-x-0"
                   }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-extrabold text-blue-700">
-                      {mod.nombre_modulo}
-                    </span>
-                    <EstadoEtiquetaRevision
-                      estado={mod.adjuntado ? "Completado" : "Pendiente"}
-                    />
-                  </div>
-                  <p className="mt-1.5 flex items-center gap-1.5 truncate text-xs font-semibold text-slate-700">
-                    <UserCheck size={13} className="shrink-0 text-emerald-600" />
-                    Docente: {mod.docente_asignado}
-                  </p>
-                  <p className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-slate-500">
-                    <Building2 size={12} className="shrink-0 text-indigo-600" />
-                    {mod.empresa}
-                  </p>
-                  {mod.nota !== null && mod.nota !== undefined && (
-                    <p className="mt-1 text-[11px] font-bold text-emerald-700">
-                      Nota registrada: {formatoNota(mod.nota)} / 20
-                    </p>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section
-          className={`overflow-hidden rounded-2xl border shadow-sm ${surface}`}
-        >
-          <div className="bg-gradient-to-r from-[#173c83] to-[#2866c7] p-5 text-white sm:p-6">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <AvatarRevision estudiante={estudiante} grande />
-
-              <div className="min-w-0 flex-1">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-wider">
-                    Revisión · {moduloActivo.nombre_modulo}
-                  </span>
-                  <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-semibold">
-                    {estudiante.expediente}
-                  </span>
-                  <span
-                    className={`rounded-full px-3 py-1 text-[10px] font-bold ${
-                      listoParaConstancia
-                        ? "bg-emerald-400/25 text-emerald-100 ring-1 ring-emerald-200/40"
-                        : "bg-amber-400/20 text-amber-100 ring-1 ring-amber-200/30"
-                    }`}
-                  >
-                    {listoParaConstancia
-                      ? "Listo para constancia"
-                      : "Pendiente para constancia"}
-                  </span>
-                </div>
-
-                <h1 className="text-xl font-extrabold sm:text-2xl">
-                  {estudiante.nombre}
-                </h1>
-
-                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-blue-100">
-                  <span className="flex items-center gap-1.5">
-                    <UserRound size={14} />
-                    DNI: {estudiante.dni}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <GraduationCap size={14} />
-                    {estudiante.carrera}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <BookOpen size={14} />
-                    {moduloActivo.nombre_modulo}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <UserCheck size={14} />
-                    Docente: {moduloActivo.docente_asignado}
-                  </span>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/20 bg-white/10 p-4 sm:min-w-36">
-                <p className="text-xs text-blue-100">Nota calculada</p>
-                <p className="mt-1 text-4xl font-extrabold">
-                  {formatoNota(notaCalculada)}
-                </p>
-                <p className="mt-1 text-xs text-blue-100">De 20 puntos</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 border-b border-slate-200 p-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-blue-50 p-2.5 text-blue-600">
-                <Building2 size={19} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className={`text-[11px] ${muted}`}>Centro de prácticas</p>
-                <input
-                  type="text"
-                  disabled={moduloYaCalificado}
-                  value={empresaActual}
-                  onChange={(e) =>
-                    setsetterSafe(setEmpresaPorModulo, e.target.value)
-                  }
-                  className="mt-0.5 w-full rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold outline-none focus:border-blue-300 focus:bg-white"
                 />
-              </div>
+              </button>
+            );
+          })}
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-[1400px] px-4 pb-14 sm:px-6">
+        {/* Filtro de módulo (igual que el "Classwork filter") */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 py-5">
+          <label className={`relative block w-full max-w-xs rounded-t-md border-b ${k.relleno} ${k.borde}`}>
+            <span className={`absolute left-4 top-2 text-xs ${k.suave}`}>Módulo</span>
+            <select
+              value={moduloActivo.numero_modulo}
+              onChange={(e) => elegirModulo(e.target.value)}
+              className="w-full cursor-pointer appearance-none bg-transparent px-4 pb-2 pt-6 text-base outline-none"
+            >
+              {modulosEstudiante.map((m) => (
+                <option key={m.numero_modulo} value={m.numero_modulo} className="text-[#202124]">
+                  {m.nombre_modulo}
+                  {m.adjuntado ? "  ✓" : ""}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={18} className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 ${k.suave}`} />
+          </label>
+
+          <div className={`flex flex-wrap items-center gap-x-5 gap-y-1 text-sm ${k.suave}`}>
+            <span>DNI {estudiante.dni}</span>
+            <span>{estudiante.carrera}</span>
+            <span>Asesor: {moduloActivo.docente_asignado}</span>
+          </div>
+        </div>
+
+        {/* ════════════ EVALUACIÓN ════════════ */}
+        {seccion === "evaluacion" && (
+          <div key="ev" className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="space-y-5">
+              {/* Datos de la evaluación */}
+              <section className={`rv-up rounded-lg border p-5 ${k.tarjeta}`}>
+                <div className="space-y-3">
+                  <CampoRelleno etiqueta="Título" k={k}>
+                    <input
+                      readOnly
+                      value={`Evaluación EFSRT · ${moduloActivo.nombre_modulo}`}
+                      className={`${inpBase} text-base`}
+                    />
+                  </CampoRelleno>
+
+                  <CampoRelleno etiqueta="Observaciones generales del docente (opcional)" k={k}>
+                    <textarea
+                      rows={3}
+                      disabled={moduloYaCalificado}
+                      value={observaciones[claveModulo] || ""}
+                      onChange={(e) => setsetterSafe(setObservaciones, e.target.value)}
+                      placeholder="Escribe aquí tus observaciones sobre el desempeño del estudiante…"
+                      className={`${inpBase} resize-none`}
+                    />
+                  </CampoRelleno>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <CampoRelleno etiqueta="Logros destacados" k={k}>
+                      <textarea
+                        rows={2}
+                        disabled={moduloYaCalificado}
+                        value={logros[claveModulo] || ""}
+                        onChange={(e) => setsetterSafe(setLogros, e.target.value)}
+                        placeholder="Principales logros del estudiante…"
+                        className={`${inpBase} resize-none`}
+                      />
+                    </CampoRelleno>
+                    <CampoRelleno etiqueta="Aspectos por mejorar" k={k}>
+                      <textarea
+                        rows={2}
+                        disabled={moduloYaCalificado}
+                        value={mejoras[claveModulo] || ""}
+                        onChange={(e) => setsetterSafe(setMejoras, e.target.value)}
+                        placeholder="Aspectos que debe fortalecer…"
+                        className={`${inpBase} resize-none`}
+                      />
+                    </CampoRelleno>
+                  </div>
+                </div>
+
+                {/* Evidencias adjuntas (como los archivos adjuntos de una tarea) */}
+                <div className="mt-5">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-medium">Evidencias adjuntas al expediente</p>
+                    <button
+                      type="button"
+                      onClick={() => conectarEvidenciasAlHacerClick("evidencias")}
+                      className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${k.hover} ${k.acento}`}
+                    >
+                      Administrar
+                    </button>
+                  </div>
+
+                  {evidenciasElegidas.length === 0 ? (
+                    <div className={`rounded-md border border-dashed p-5 text-center text-sm ${k.borde} ${k.suave}`}>
+                      Aún no hay evidencias elegidas para este módulo.
+                      <button
+                        type="button"
+                        onClick={() => conectarEvidenciasAlHacerClick("evidencias")}
+                        className={`ml-1 font-medium underline-offset-2 hover:underline ${k.acento}`}
+                      >
+                        Elegir evidencias
+                      </button>
+                    </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {evidenciasElegidas.map((ev) => {
+                        const tieneFoto = (ev.archivos || []).some((a) => a.esFoto);
+                        return (
+                          <li key={ev.id} className={`flex items-center gap-3 rounded-md border p-2.5 transition ${k.borde} ${k.hover}`}>
+                            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#e8f0fe] text-[#1a73e8]">
+                              {tieneFoto ? <ImageIcon size={18} /> : <FileText size={18} />}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">{ev.titulo}</p>
+                              <p className={`truncate text-xs ${k.suave}`}>
+                                <span className={colorEstadoEv(ev.estado, darkMode)}>{ev.estado}</span> • {(ev.archivos || []).length} archivo(s)
+                              </p>
+                            </div>
+                            <span title={ev.descripcion || "Sin descripción"} className={`shrink-0 ${k.suave}`}><Info size={16} /></span>
+                            <button
+                              type="button"
+                              aria-label="Quitar del expediente (no elimina la evidencia)"
+                              title="Quitar del expediente (no elimina la evidencia)"
+                              onClick={() => alternarSeleccionEvidencia(ev.id)}
+                              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition ${k.hover}`}
+                            >
+                              <X size={16} />
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </section>
+
+              {/* Rúbrica */}
+              <section className={`rv-up rounded-lg border p-5 ${k.tarjeta}`} style={{ animationDelay: "60ms" }}>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-base font-medium">Rúbrica EFSRT</h2>
+                    <p className={`text-sm ${k.suave}`}>Haz clic en el nivel logrado por cada criterio. La nota se calcula sola.</p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs ${k.relleno} ${k.suave}`}>
+                    {criteriosCompletados} de {CRITERIOS.length} evaluados
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <div className="min-w-[780px]">
+                    <div className="grid grid-cols-[210px_repeat(4,minmax(0,1fr))] gap-2 pb-2">
+                      <span />
+                      {NIVELES.map((n) => (
+                        <span key={n.valor} className={`px-1 text-center text-xs font-medium ${k.suave}`}>{n.nombre}</span>
+                      ))}
+                    </div>
+
+                    {CRITERIOS.map((c) => {
+                      const sel = Number(evaluacionActual[c.id] || 0);
+                      return (
+                        <div key={c.id} className={`grid grid-cols-[210px_repeat(4,minmax(0,1fr))] gap-2 border-t py-3 ${k.borde}`}>
+                          <div className="pr-2">
+                            <p className="text-sm font-medium leading-snug">{c.nombre}</p>
+                            <p className={`mt-1 text-xs leading-relaxed ${k.suave}`}>{c.descripcion}</p>
+                            <p className="mt-1.5 text-xs">
+                              {sel ? (
+                                <span className={k.acento}>Evaluado</span>
+                              ) : (
+                                <span className="text-[#d93025]">Sin evaluar</span>
+                              )}
+                              <span className={k.suave}> · {c.peso}% · hasta {(c.peso * 0.2).toFixed(2)} pts</span>
+                            </p>
+                          </div>
+
+                          {NIVELES.map((n) => {
+                            const activo = sel === n.valor;
+                            const pts = (n.valor / 4) * c.peso * 0.2;
+                            return (
+                              <button
+                                key={n.valor}
+                                type="button"
+                                disabled={moduloYaCalificado}
+                                aria-pressed={activo}
+                                onClick={() => actualizarNivel(c.id, n.valor)}
+                                className={`flex min-h-[88px] flex-col rounded-md border p-2.5 text-left transition disabled:cursor-not-allowed ${
+                                  activo ? k.seleccion : `${k.borde} ${k.hover}`
+                                }`}
+                              >
+                                <span className="flex items-center justify-between text-sm font-medium">
+                                  {pts.toFixed(2)} pts
+                                  {activo && <Check size={16} />}
+                                </span>
+                                <span className={`mt-1 text-[11px] leading-snug ${activo ? "" : k.suave}`}>{n.descripcion}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className={`mt-2 flex items-center justify-between border-t pt-3 ${k.borde}`}>
+                  <span className={`text-sm ${k.suave}`}>
+                    {notaAprobatoria ? "Desempeño aprobatorio" : criteriosCompletados === CRITERIOS.length ? "Por debajo del mínimo (13)" : "En proceso de evaluación"}
+                  </span>
+                  <span className={`text-lg font-medium tabular-nums ${notaAprobatoria ? k.acento : ""}`}>
+                    {formatoNota(notaCalculada)} <span className={`text-sm ${k.suave}`}>/ 20</span>
+                  </span>
+                </div>
+              </section>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-indigo-50 p-2.5 text-indigo-600">
-                <Clock3 size={19} />
-              </div>
+            {/* Panel de ajustes (como la columna derecha de crear tarea) */}
+            <aside className={`rv-up space-y-4 rounded-lg border p-5 lg:sticky lg:top-36 ${k.tarjeta}`} style={{ animationDelay: "90ms" }}>
               <div>
-                <p className={`text-[11px] ${muted}`}>Horas acumuladas</p>
-                <div className="mt-0.5 flex items-center gap-1 text-sm font-semibold">
+                <p className="mb-1.5 text-sm font-medium">Para</p>
+                <div className={`flex items-center gap-2.5 rounded-md border px-3 py-2 ${k.borde}`}>
+                  <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full"><AvatarRevision estudiante={estudiante} /></span>
+                  <span className="min-w-0 text-sm">
+                    <span className="block truncate">{estudiante.nombre}</span>
+                    <span className={`block truncate text-xs ${k.suave}`}>{moduloActivo.nombre_modulo}</span>
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-sm font-medium">Puntos</p>
+                <div className={`flex items-center justify-between rounded-md border px-3 py-2.5 ${k.borde}`}>
+                  <span className={`text-base font-medium tabular-nums ${notaAprobatoria ? k.acento : ""}`}>{formatoNota(notaCalculada)}</span>
+                  <span className={`text-xs ${k.suave}`}>de 20 · mínimo 13</span>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-sm font-medium">Centro de prácticas</p>
+                <div className={`flex items-center gap-2 rounded-md border px-3 py-2 ${k.borde}`}>
+                  <Building2 size={16} className={k.suave} />
+                  <input
+                    type="text"
+                    disabled={moduloYaCalificado}
+                    value={empresaActual}
+                    onChange={(e) => setsetterSafe(setEmpresaPorModulo, e.target.value)}
+                    className={inpBase}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-sm font-medium">Portafolio</p>
+                <div className="relative">
+                  <select
+                    disabled={moduloYaCalificado}
+                    value={estadoPortafolioActual}
+                    onChange={(e) => setsetterSafe(setPortafolioPorModulo, e.target.value)}
+                    className={`w-full cursor-pointer appearance-none rounded-md border bg-transparent px-3 py-2.5 pr-9 text-sm outline-none focus:border-[#188038] disabled:cursor-not-allowed disabled:opacity-70 ${k.borde}`}
+                  >
+                    <option value="Pendiente de revisión" className="text-[#202124]">Pendiente de revisión</option>
+                    <option value="En revisión" className="text-[#202124]">En revisión</option>
+                    <option value="Conforme" className="text-[#202124]">Conforme</option>
+                    <option value="Observado" className="text-[#202124]">Observado</option>
+                  </select>
+                  <ChevronDown size={16} className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 ${k.suave}`} />
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-sm font-medium">Horas registradas</p>
+                <div className={`flex items-center gap-2 rounded-md border px-3 py-2 ${k.borde}`}>
+                  <Clock3 size={16} className={k.suave} />
                   <input
                     type="number"
                     min={0}
                     max={1000}
                     disabled={moduloYaCalificado}
                     value={horasAcumuladasActuales}
-                    onChange={(e) =>
-                      setsetterSafe(
-                        setHorasPorModulo,
-                        Math.max(0, Number(e.target.value || 0))
-                      )
-                    }
-                    className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-0.5 text-xs font-bold text-slate-800 outline-none"
+                    onChange={(e) => setsetterSafe(setHorasPorModulo, Math.max(0, Number(e.target.value || 0)))}
+                    className={`${inpBase} w-20`}
                   />
-                  <span className={`text-xs ${muted}`}>
-                    / {horasRequeridasActuales} h
+                  <span className={`text-xs ${k.suave}`}>/ {horasRequeridasActuales} h ({pctHoras}%)</span>
+                </div>
+              </div>
+
+              <div className={`border-t pt-4 ${k.borde}`}>
+                <label className={`flex cursor-pointer items-start gap-3 ${moduloYaCalificado ? "cursor-not-allowed opacity-70" : ""}`}>
+                  <input
+                    type="checkbox"
+                    disabled={moduloYaCalificado}
+                    checked={verificadoDocenteActual}
+                    onChange={() => setsetterSafe(setVerificadoPorModulo, !verificadoDocenteActual)}
+                    className="mt-0.5 h-4 w-4 accent-[#188038]"
+                  />
+                  <span className="text-sm">
+                    Verificado por el docente
+                    <span className={`mt-0.5 block text-xs leading-relaxed ${k.suave}`}>
+                      Confirma que revisaste rúbrica, evidencias y portafolio.
+                    </span>
                   </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-violet-50 p-2.5 text-violet-600">
-                <FolderCheck size={19} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className={`text-[11px] ${muted}`}>Portafolio / Evidencias</p>
-                <select
-                  disabled={moduloYaCalificado}
-                  value={estadoPortafolioActual}
-                  onChange={(e) =>
-                    setsetterSafe(setPortafolioPorModulo, e.target.value)
-                  }
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 outline-none"
-                >
-                  <option value="Pendiente de revisión">
-                    Pendiente de revisión
-                  </option>
-                  <option value="En revisión">En revisión</option>
-                  <option value="Conforme">Conforme</option>
-                  <option value="Observado">Observado</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-600">
-                <ShieldCheck size={19} />
-              </div>
-              <div>
-                <p className={`text-[11px] ${muted}`}>Constancia (Admin)</p>
-                <span
-                  className={`mt-0.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                    listoParaConstancia
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-amber-50 text-amber-700"
-                  }`}
-                >
-                  {listoParaConstancia ? "Listo para generar" : "Incompleto"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <nav className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-3 sm:p-4">
-            {secciones.map((item) => {
-              const Icono = item.icono;
-              const activa = seccion === item.id;
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSeccion(item.id)}
-                  className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
-                    activa
-                      ? "border-blue-200 bg-blue-50 text-blue-700"
-                      : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-slate-50"
-                  }`}
-                >
-                  <div
-                    className={`rounded-xl p-2 ${
-                      activa
-                        ? "bg-blue-600 text-white"
-                        : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    <Icono size={19} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold">{item.nombre}</p>
-                    <p className="mt-0.5 text-[11px] opacity-75">
-                      {item.descripcion}
-                    </p>
-                  </div>
-
-                  {activa && <CheckCircle2 size={17} />}
-                </button>
-              );
-            })}
-          </nav>
-        </section>
-
-        {seccion === "evaluacion" && (
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[1fr_320px]">
-            <section
-              className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${surface}`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-xl bg-blue-50 p-2 text-blue-600">
-                      <ClipboardCheck size={19} />
-                    </div>
-                    <h2 className="font-bold">
-                      Rúbrica de evaluación · {moduloActivo.nombre_modulo}
-                    </h2>
-                  </div>
-                  <p className={`mt-2 text-xs ${muted}`}>
-                    Docente asignado: <strong>{moduloActivo.docente_asignado}</strong> · Empresa: <strong>{empresaActual}</strong> · {evidenciasElegidas.length} evidencias elegidas.
-                  </p>
-                </div>
-
-                {moduloYaCalificado && (
-                  <EstadoEtiquetaRevision estado="Completado" />
-                )}
+                </label>
               </div>
 
-              <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
-                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-                  <div>
-                    <h3 className="text-xs font-extrabold uppercase tracking-wide text-blue-800">
-                      Verificación del docente para constancia
-                    </h3>
-                    <p className="mt-0.5 text-xs text-slate-600">
-                      Confirma si has verificado la rúbrica, evidencias, portafolio y horas del módulo para habilitar la constancia al administrador.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={moduloYaCalificado}
-                    onClick={() =>
-                      setsetterSafe(
-                        setVerificadoPorModulo,
-                        !verificadoDocenteActual
-                      )
-                    }
-                    className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
-                      verificadoDocenteActual
-                        ? "border-emerald-300 bg-emerald-600 text-white"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    {verificadoDocenteActual ? (
-                      <CheckSquare size={15} />
-                    ) : (
-                      <Square size={15} />
-                    )}
-                    {verificadoDocenteActual
-                      ? "Verificado por docente"
-                      : "Marcar como verificado"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-5 space-y-4">
-                {CRITERIOS.map((criterio, index) => {
-                  const nivelSeleccionado = Number(
-                    evaluacionActual[criterio.id] || 0
-                  );
-
-                  return (
-                    <div
-                      key={criterio.id}
-                      className="rounded-2xl border border-slate-200 p-4"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="flex gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xs font-extrabold text-slate-600">
-                            {String(index + 1).padStart(2, "0")}
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-bold">
-                              {criterio.nombre}
-                            </h3>
-                            <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                              {criterio.descripcion}
-                            </p>
-                          </div>
-                        </div>
-
-                        <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
-                          {criterio.peso}% del total
-                        </span>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                        {NIVELES.map((nivel) => {
-                          const activo = nivelSeleccionado === nivel.valor;
-
-                          return (
-                            <button
-                              key={nivel.valor}
-                              type="button"
-                              disabled={moduloYaCalificado}
-                              onClick={() =>
-                                actualizarNivel(criterio.id, nivel.valor)
-                              }
-                              className={`rounded-xl border p-3 text-left transition disabled:cursor-not-allowed ${
-                                activo
-                                  ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500/10"
-                                  : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span
-                                  className={`text-xs font-bold ${
-                                    activo ? "text-blue-700" : "text-slate-700"
-                                  }`}
-                                >
-                                  {nivel.nombre}
-                                </span>
-
-                                <span
-                                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
-                                    activo
-                                      ? "bg-blue-600 text-white"
-                                      : "bg-slate-100 text-slate-500"
-                                  }`}
-                                >
-                                  {nivel.valor}
-                                </span>
-                              </div>
-
-                              <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                                {nivel.descripcion}
-                              </p>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Campo label="Logros destacados">
-                  <textarea
-                    rows={3}
-                    disabled={moduloYaCalificado}
-                    value={logros[claveModulo] || ""}
-                    onChange={(e) =>
-                      setsetterSafe(setLogros, e.target.value)
-                    }
-                    placeholder="Describe los principales logros del estudiante..."
-                    className={inputRevisionClass}
-                  />
-                </Campo>
-
-                <Campo label="Aspectos por mejorar">
-                  <textarea
-                    rows={3}
-                    disabled={moduloYaCalificado}
-                    value={mejoras[claveModulo] || ""}
-                    onChange={(e) =>
-                      setsetterSafe(setMejoras, e.target.value)
-                    }
-                    placeholder="Indica los aspectos que debe fortalecer..."
-                    className={inputRevisionClass}
-                  />
-                </Campo>
-              </div>
-
-              <div className="mt-4">
-                <Campo label="Observaciones generales del docente">
-                  <textarea
-                    rows={4}
-                    disabled={moduloYaCalificado}
-                    value={observaciones[claveModulo] || ""}
-                    onChange={(e) =>
-                      setsetterSafe(setObservaciones, e.target.value)
-                    }
-                    placeholder="Escribe aquí tus observaciones sobre el desempeño del estudiante..."
-                    className={inputRevisionClass}
-                  />
-                </Campo>
-              </div>
-            </section>
-
-            <aside className="space-y-4">
-              <div
-                className={`rounded-2xl border p-5 shadow-sm ${surface}`}
-              >
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold">Resumen de evaluación</h3>
-                  <Target className="text-blue-600" size={20} />
-                </div>
-
-                <div className="mt-5 text-center">
-                  <div className="mx-auto flex h-36 w-36 flex-col items-center justify-center rounded-full border-[9px] border-blue-100 bg-blue-50">
-                    <span className="text-4xl font-extrabold text-blue-700">
-                      {formatoNota(notaCalculada)}
-                    </span>
-                    <span className="mt-1 text-xs font-semibold text-blue-600">
-                      / 20 puntos
-                    </span>
-                  </div>
-
-                  <p className="mt-3 text-sm font-bold">
-                    {notaAprobatoria
-                      ? "Desempeño aprobatorio"
-                      : "En proceso de evaluación"}
-                  </p>
-                  <p className={`mt-1 text-xs ${muted}`}>
-                    {moduloActivo.nombre_modulo} · Nota calculada
-                  </p>
-                </div>
-
-                <div className="mt-5 space-y-3">
-                  <div className="flex justify-between text-xs">
-                    <span className={muted}>Criterios completados</span>
-                    <strong>
-                      {criteriosCompletados}/{CRITERIOS.length}
-                    </strong>
-                  </div>
-
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full bg-blue-600 transition-all"
-                      style={{
-                        width: `${
-                          (criteriosCompletados / CRITERIOS.length) * 100
-                        }%`,
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-5 space-y-2 border-t border-slate-200 pt-4 text-xs">
-                  <div className="flex justify-between">
-                    <span className={muted}>Verificación docente</span>
-                    <strong
-                      className={
-                        verificadoDocenteActual
-                          ? "text-emerald-600"
-                          : "text-amber-600"
-                      }
-                    >
-                      {verificadoDocenteActual ? "Verificado" : "Pendiente"}
-                    </strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className={muted}>Portafolio</span>
-                    <strong>{estadoPortafolioActual}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className={muted}>Horas</span>
-                    <strong>
-                      {horasAcumuladasActuales} / {horasRequeridasActuales} h
-                    </strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className={muted}>Constancia (Admin)</span>
-                    <strong
-                      className={
-                        listoParaConstancia
-                          ? "text-emerald-600"
-                          : "text-amber-600"
-                      }
-                    >
-                      {listoParaConstancia ? "Listo" : "Incompleto"}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className={`rounded-2xl border p-4 ${surface}`}>
-                <div className="flex items-center gap-2">
-                  <MessageSquare size={18} className="text-blue-600" />
-                  <h3 className="text-sm font-bold">Checklist de constancia</h3>
-                </div>
-                <ul className={`mt-2.5 space-y-1.5 text-xs ${muted}`}>
-                  <li>
-                    {notaAprobatoria ? "✓" : "•"} Nota aprobatoria (≥ 13)
-                  </li>
-                  <li>
-                    {tieneEvidencias ? "✓" : "•"} Evidencia elegida (
-                    {evidenciasElegidas.length})
-                  </li>
-                  <li>
-                    {portafolioConforme ? "✓" : "•"} Portafolio conforme
-                  </li>
-                  <li>
-                    {verificadoDocenteActual ? "✓" : "•"} Verificado por docente
-                  </li>
+              {/* Requisitos para la constancia */}
+              <div className={`border-t pt-4 ${k.borde}`}>
+                <p className="mb-2 flex items-center justify-between text-sm font-medium">
+                  Requisitos para la constancia
+                  <span className={`text-xs font-normal ${k.suave}`}>{okCount}/{pasos.length}</span>
+                </p>
+                <ul className="space-y-1">
+                  {pasos.map((p) => {
+                    const Ico = p.icono;
+                    return (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (p.conectar) conectarEvidenciasAlHacerClick(p.ir || "evidencias");
+                            else if (p.ir) setSeccion(p.ir);
+                          }}
+                          className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition ${p.ir ? k.hover : "cursor-default"}`}
+                        >
+                          <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full ${p.ok ? "bg-[#188038] text-white" : `${k.relleno} ${k.suave}`}`}>
+                            {p.ok ? <Check size={14} /> : <Ico size={13} />}
+                          </span>
+                          <span className="min-w-0 text-sm">
+                            <span className="block truncate">{p.titulo}</span>
+                            <span className={`block truncate text-[11px] ${p.ok ? k.acento : k.suave}`}>{p.detalle}</span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setSeccion("evidencias")}
-                className="flex w-full items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-bold text-blue-700 transition hover:bg-blue-100"
-              >
-                Revisar evidencias ({evidenciasElegidas.length})
-                <ChevronRight size={18} />
-              </button>
             </aside>
           </div>
         )}
 
+        {/* ════════════ EVIDENCIAS ════════════ */}
         {seccion === "evidencias" && (
-          <section
-            className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${surface}`}
-          >
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="rounded-xl bg-violet-50 p-2 text-violet-600">
-                    <FileText size={19} />
-                  </div>
-                  <h2 className="font-bold">
-                    Evidencias · {moduloActivo.nombre_modulo}
-                  </h2>
-                </div>
-                <p className={`mt-2 text-xs ${muted}`}>
-                  Marca las evidencias/fotos/archivos que deseas adjuntar y calificar para {estudiante.nombre}.
-                </p>
-              </div>
+          <section key="evd" className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                disabled={moduloYaCalificado}
+                onClick={() => setModalEvidencia(true)}
+                className={`inline-flex h-12 items-center gap-3 rounded-full border px-6 text-sm font-medium shadow-sm transition hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 ${k.tarjeta}`}
+              >
+                <Plus size={22} className="text-[#1a73e8]" />
+                Nueva evidencia
+              </button>
 
-              <div className="flex items-center gap-2">
+              <div className={`flex items-center gap-3 text-sm ${k.suave}`}>
+                <span>
+                  <strong className="font-medium text-current">{tareasAprobadas}</strong> de {tareasActuales.length} aprobadas ·{" "}
+                  <strong className="font-medium text-current">{evidenciasElegidas.length}</strong> elegidas · {tareasPendientes} pendientes
+                </span>
                 <button
                   type="button"
                   onClick={cargarEvidenciasDeModulo}
-                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+                  aria-label="Recargar evidencias"
+                  title="Recargar evidencias"
+                  className={`grid h-9 w-9 place-items-center rounded-full transition ${k.hover}`}
                 >
-                  <RefreshCw
-                    size={15}
-                    className={cargandoEvBD ? "animate-spin" : ""}
-                  />
-                  Recargar
+                  <RefreshCw size={17} className={cargandoEvBD ? "animate-spin" : ""} />
                 </button>
-
-                <button
-                  type="button"
-                  disabled={moduloYaCalificado}
-                  onClick={() => setModalEvidencia(true)}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  <Plus size={17} />
-                  Nueva evidencia
-                </button>
+                <Kebab id="masivo" abierto={menuAbierto} setAbierto={setMenuAbierto} items={accionesMasivas} k={k} etiqueta="Acciones para todas las evidencias" />
               </div>
             </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {[
-                {
-                  titulo: "Elegidas para calificar",
-                  cantidad: evidenciasElegidas.length,
-                  icono: CheckSquare,
-                  fondo: "bg-blue-50 text-blue-600",
-                },
-                {
-                  titulo: "Pendientes",
-                  cantidad: tareasPendientes,
-                  icono: Clock3,
-                  fondo: "bg-amber-50 text-amber-600",
-                },
-                {
-                  titulo: "Aprobadas",
-                  cantidad: tareasAprobadas,
-                  icono: CheckCircle2,
-                  fondo: "bg-emerald-50 text-emerald-600",
-                },
-              ].map((item) => {
-                const Icono = item.icono;
-
+            <div className="flex flex-wrap gap-2">
+              {["Todas", "Pendiente", "En revisión", "Aprobado", "Observado"].map((f) => {
+                const activo = filtroEvidencia === f;
                 return (
-                  <div
-                    key={item.titulo}
-                    className="flex items-center gap-3 rounded-xl border border-slate-200 p-4"
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFiltroEvidencia(f)}
+                    aria-pressed={activo}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm transition ${
+                      activo ? `${k.seleccion} font-medium` : `${k.borde} ${k.hover}`
+                    }`}
                   >
-                    <div className={`rounded-xl p-3 ${item.fondo}`}>
-                      <Icono size={20} />
-                    </div>
-                    <div>
-                      <p className={`text-xs ${muted}`}>{item.titulo}</p>
-                      <p className="mt-1 text-2xl font-extrabold">
-                        {item.cantidad}
-                      </p>
-                    </div>
-                  </div>
+                    {f}
+                    <span className={`text-xs ${activo ? "" : k.suave}`}>{contarEstadoEv(f)}</span>
+                  </button>
                 );
               })}
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-sm font-bold">
-                Evidencias registradas ({tareasActuales.length})
-              </h3>
-
-              <select
-                value={filtroEvidencia}
-                onChange={(e) => setFiltroEvidencia(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none"
-              >
-                <option>Todas</option>
-                <option>Pendiente</option>
-                <option>En revisión</option>
-                <option>Aprobado</option>
-                <option>Observado</option>
-              </select>
-            </div>
-
-            {tareasActuales.filter(
-              (e) =>
-                filtroEvidencia === "Todas" || e.estado === filtroEvidencia
-            ).length === 0 ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-slate-300 py-14 text-center">
-                <FileText className="mx-auto text-slate-300" size={38} />
-                <h3 className="mt-3 text-sm font-bold">
-                  No hay evidencias para este módulo
+            {evidenciasVisibles.length === 0 ? (
+              <div className={`rounded-lg border border-dashed py-16 text-center ${k.borde}`}>
+                <FileText className={`mx-auto ${k.suave}`} size={40} />
+                <h3 className="mt-3 text-base font-medium">
+                  {tareasActuales.length === 0 ? "No hay evidencias para este módulo" : "Ninguna evidencia con este estado"}
                 </h3>
-                <p className={`mt-1 text-xs ${muted}`}>
-                  Crea o adjunta evidencias para {moduloActivo.nombre_modulo}.
+                <p className={`mt-1 text-sm ${k.suave}`}>
+                  {tareasActuales.length === 0
+                    ? `Crea o adjunta evidencias para ${moduloActivo.nombre_modulo}.`
+                    : "Prueba con otro filtro."}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setModalEvidencia(true)}
-                  className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700"
-                >
-                  Crear evidencia
-                </button>
+                {tareasActuales.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setModalEvidencia(true)}
+                    className="mt-5 rounded-full bg-[#188038] px-5 py-2 text-sm font-medium text-white transition hover:bg-[#137333]"
+                  >
+                    Crear evidencia
+                  </button>
+                )}
               </div>
             ) : (
-              <div className="mt-3 space-y-3">
-                {tareasActuales
-                  .filter(
-                    (e) =>
-                      filtroEvidencia === "Todas" || e.estado === filtroEvidencia
-                  )
-                  .map((evidencia, index) => {
-                    const elegida = evidencia.seleccionada !== false;
-                    return (
-                      <article
-                        key={evidencia.id}
-                        className={`rounded-2xl border p-4 transition ${
-                          elegida
-                            ? "border-blue-300 bg-blue-50/30"
-                            : "border-slate-200 hover:border-blue-200"
-                        }`}
+              <ul className={`divide-y overflow-visible rounded-lg border ${k.tarjeta} ${darkMode ? "divide-[#3c4043]" : "divide-[#dadce0]"}`}>
+                {evidenciasVisibles.map((evidencia, index) => {
+                  const elegida = evidencia.seleccionada !== false;
+                  const dias = diasPara(evidencia.fechaLimite);
+                  const abierta = evAbierta === evidencia.id;
+                  const tieneFoto = (evidencia.archivos || []).some((a) => a.esFoto);
+                  const textoVence =
+                    dias === null
+                      ? "Sin fecha límite"
+                      : dias < 0
+                        ? `Venció hace ${Math.abs(dias)} d`
+                        : dias === 0
+                          ? "Vence hoy"
+                          : `Vence en ${dias} d`;
+                  return (
+                    <li key={evidencia.id} className="rv-up" style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={abierta}
+                        onClick={() => setEvAbierta(abierta ? null : evidencia.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setEvAbierta(abierta ? null : evidencia.id);
+                          }
+                        }}
+                        className={`flex cursor-pointer items-center gap-3 px-4 py-3 transition ${k.hover}`}
                       >
-                        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-                          <div className="flex min-w-0 gap-3">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                alternarSeleccionEvidencia(evidencia.id)
-                              }
-                              title={
-                                elegida
-                                  ? "Elegida para revisar/calificar"
-                                  : "Marcar evidencia"
-                              }
-                              className="mt-1 shrink-0 text-blue-600"
-                            >
-                              {elegida ? (
-                                <CheckSquare size={20} />
-                              ) : (
-                                <Square size={20} className="text-slate-400" />
+                        <input
+                          type="checkbox"
+                          checked={elegida}
+                          onChange={() => alternarSeleccionEvidencia(evidencia.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          title={elegida ? "Elegida para adjuntar al expediente" : "Elegir para adjuntar al expediente"}
+                          aria-label={`Elegir ${evidencia.titulo}`}
+                          className="h-4 w-4 shrink-0 accent-[#188038]"
+                        />
+                        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-white ${elegida ? "bg-[#1a73e8]" : "bg-[#80868b]"}`}>
+                          {tieneFoto ? <ImageIcon size={18} /> : <FileText size={18} />}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[15px]">{evidencia.titulo}</p>
+                          <p className={`truncate text-xs ${k.suave}`}>
+                            Publicada {evidencia.fechaCreacion} · <span className={dias !== null && dias < 0 ? "text-[#d93025]" : ""}>{textoVence}</span>
+                          </p>
+                        </div>
+                        <span className={`hidden shrink-0 text-sm font-medium sm:block ${colorEstadoEv(evidencia.estado, darkMode)}`}>
+                          {evidencia.estado}
+                        </span>
+                        <Kebab
+                          id={`ev-${evidencia.id}`}
+                          abierto={menuAbierto}
+                          setAbierto={setMenuAbierto}
+                          k={k}
+                          items={[
+                            { t: abierta ? "Ocultar detalle" : "Ver detalle", fn: () => setEvAbierta(abierta ? null : evidencia.id) },
+                            { t: "Abrir archivo", fn: () => window.open(evidencia.archivo, "_blank", "noopener"), off: !evidencia.archivo },
+                            "---",
+                            { t: "Marcar como aprobada", fn: () => cambiarEstadoEvidencia(evidencia.id, "Aprobado"), off: moduloYaCalificado },
+                            { t: "Marcar como observada", fn: () => cambiarEstadoEvidencia(evidencia.id, "Observado"), off: moduloYaCalificado },
+                            "---",
+                            { t: "Eliminar", fn: () => eliminarEvidencia(evidencia.id), off: moduloYaCalificado, peligro: true },
+                          ]}
+                        />
+                      </div>
+
+                      {abierta && (
+                        <div className={`rv-fade space-y-4 border-t px-4 pb-5 pl-[4.5rem] pt-4 ${k.borde}`}>
+                          <p className={`text-sm leading-relaxed ${k.suave}`}>
+                            {evidencia.descripcion || "Sin descripción adicional."}
+                          </p>
+
+                          {Array.isArray(evidencia.archivos) && evidencia.archivos.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {evidencia.archivos.map((f, fIdx) =>
+                                f.esFoto && f.url ? (
+                                  <a
+                                    key={f.id || `${f.name}-${fIdx}`}
+                                    href={f.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title={f.name}
+                                    className={`block h-14 w-14 overflow-hidden rounded-md border transition hover:scale-105 ${k.borde}`}
+                                  >
+                                    <img src={f.url} alt={f.name} loading="lazy" className="h-full w-full object-cover" />
+                                  </a>
+                                ) : (
+                                  <span
+                                    key={f.id || `${f.name}-${fIdx}`}
+                                    className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs ${k.borde}`}
+                                  >
+                                    <Paperclip size={13} className={k.suave} />
+                                    <span className="max-w-[160px] truncate">{f.name}</span>
+                                  </span>
+                                )
                               )}
-                            </button>
-
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
-                              <FileText size={19} />
                             </div>
+                          )}
 
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <h4 className="text-sm font-bold">
-                                  {evidencia.titulo}
-                                </h4>
-                                <EstadoEtiquetaRevision
-                                  estado={evidencia.estado}
-                                />
-                                <span
-                                  className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
-                                    elegida
-                                      ? "bg-blue-100 text-blue-700"
-                                      : "bg-slate-100 text-slate-500"
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className={`inline-flex overflow-hidden rounded-full border ${k.borde}`} role="group" aria-label="Estado de la evidencia">
+                              {["Pendiente", "En revisión", "Aprobado", "Observado"].map((est) => (
+                                <button
+                                  key={est}
+                                  type="button"
+                                  disabled={moduloYaCalificado}
+                                  aria-pressed={evidencia.estado === est}
+                                  onClick={() => cambiarEstadoEvidencia(evidencia.id, est)}
+                                  className={`border-r px-3.5 py-1.5 text-xs font-medium transition last:border-r-0 disabled:cursor-not-allowed ${k.borde} ${
+                                    evidencia.estado === est ? k.seleccion : k.hover
                                   }`}
                                 >
-                                  {elegida
-                                    ? "Elegida para revisión"
-                                    : "No elegida"}
-                                </span>
-                              </div>
-
-                              <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                                {evidencia.descripcion ||
-                                  "Sin descripción adicional."}
-                              </p>
-
-                              {Array.isArray(evidencia.archivos) &&
-                                evidencia.archivos.length > 0 && (
-                                  <div className="mt-2.5 flex flex-wrap gap-2">
-                                    {evidencia.archivos.map((f, fIdx) => (
-                                      <span
-                                        key={f.id || `${f.name}-${fIdx}`}
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700"
-                                      >
-                                        {f.esFoto ? (
-                                          <ImageIcon
-                                            size={12}
-                                            className="text-blue-600"
-                                          />
-                                        ) : (
-                                          <Paperclip
-                                            size={12}
-                                            className="text-slate-500"
-                                          />
-                                        )}
-                                        <span className="max-w-[180px] truncate">
-                                          {f.name}
-                                        </span>
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-
-                              <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-400">
-                                <span className="flex items-center gap-1">
-                                  <CalendarDays size={13} />
-                                  Fecha límite:{" "}
-                                  {evidencia.fechaLimite || "No establecida"}
-                                </span>
-                                <span>Evidencia {index + 1}</span>
-                              </div>
+                                  {est}
+                                </button>
+                              ))}
                             </div>
-                          </div>
 
-                          {!moduloYaCalificado && (
-                            <button
-                              type="button"
-                              onClick={() => eliminarEvidencia(evidencia.id)}
-                              className="flex items-center gap-1 self-end text-xs font-semibold text-rose-500 hover:text-rose-700 sm:self-auto"
-                            >
-                              <Trash2 size={15} />
-                              Eliminar
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="mt-4 flex flex-col justify-between gap-3 border-t border-slate-100 pt-3 sm:flex-row sm:items-center">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                              <Paperclip size={13} />
-                              Adjuntar fotos/archivos
+                            <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${k.hover} ${k.acento}`}>
+                              <Paperclip size={15} />
+                              Adjuntar archivos
                               <input
                                 type="file"
                                 multiple
                                 accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.gif"
                                 onChange={(e) => {
-                                  adjuntarArchivosAEvidencia(
-                                    evidencia.id,
-                                    e.target.files
-                                  );
+                                  adjuntarArchivosAEvidencia(evidencia.id, e.target.files);
                                   e.target.value = "";
                                 }}
                                 className="hidden"
                               />
                             </label>
+
                             {evidencia.archivo && (
                               <a
                                 href={evidencia.archivo}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50"
+                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${k.hover} ${k.acento}`}
                               >
-                                <Eye size={13} />
-                                Ver archivo
+                                <Eye size={15} />
+                                Ver
                               </a>
                             )}
-                          </div>
 
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select
-                              disabled={moduloYaCalificado}
-                              value={evidencia.estado}
-                              onChange={(e) =>
-                                cambiarEstadoEvidencia(
-                                  evidencia.id,
-                                  e.target.value
-                                )
-                              }
-                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 outline-none focus:border-blue-500 disabled:bg-slate-100"
-                            >
-                              <option>Pendiente</option>
-                              <option>En revisión</option>
-                              <option>Aprobado</option>
-                              <option>Observado</option>
-                            </select>
+                            {!moduloYaCalificado && (
+                              <button
+                                type="button"
+                                onClick={() => eliminarEvidencia(evidencia.id)}
+                                className="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-[#d93025] transition hover:bg-[#fce8e6]/60"
+                              >
+                                <Trash2 size={15} />
+                                Eliminar
+                              </button>
+                            )}
                           </div>
                         </div>
-                      </article>
-                    );
-                  })}
-              </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </section>
         )}
 
+        {/* ════════════ RESULTADOS (libro de calificaciones) ════════════ */}
         {seccion === "resultados" && (
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[1fr_340px]">
-            <section
-              className={`rounded-2xl border p-5 shadow-sm ${surface}`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600">
-                  <ChartNoAxesCombined size={20} />
-                </div>
+          <div key="res" className="space-y-6">
+            <section className="space-y-3">
+              <div className="flex flex-wrap items-end justify-between gap-2">
                 <div>
-                  <h2 className="font-bold">
-                    Resumen de resultados · {moduloActivo.nombre_modulo}
-                  </h2>
-                  <p className={`mt-0.5 text-xs ${muted}`}>
-                    Docente asignado: {moduloActivo.docente_asignado} · Empresa: {empresaActual}
-                  </p>
+                  <h2 className="text-base font-medium">Libro de calificaciones</h2>
+                  <p className={`text-sm ${k.suave}`}>Haz clic en un módulo para revisarlo. Los datos de otros módulos salen de lo ya registrado en el expediente.</p>
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl bg-blue-50 p-4">
-                  <p className="text-xs font-semibold text-blue-600">
-                    Calificación final calculada
-                  </p>
-                  <p className="mt-2 text-4xl font-extrabold text-blue-800">
-                    {formatoNota(notaCalculada)}
-                    <span className="ml-1 text-base font-semibold">/20</span>
-                  </p>
-                </div>
+              <div className={`overflow-x-auto rounded-lg border ${k.tarjeta}`}>
+                <div className="min-w-[1000px]">
+                  {/* Encabezados de criterio */}
+                  <div className={`grid grid-cols-[240px_130px_repeat(5,minmax(130px,1fr))] border-b ${k.borde}`}>
+                    <div className={`flex items-end p-4 text-sm font-medium ${k.suave}`}>Módulo</div>
+                    <div className={`flex items-end border-l p-4 text-sm font-medium ${k.borde} ${k.suave}`}>Calificación</div>
+                    {CRITERIOS.map((c) => (
+                      <div key={c.id} className={`border-l p-3 ${k.borde}`}>
+                        <p className={`text-[11px] ${k.suave}`}>Peso {c.peso}%</p>
+                        <p className={`mt-0.5 line-clamp-2 text-sm font-medium leading-snug ${k.acento}`}>{c.nombre}</p>
+                        <p className={`mt-1 border-t pt-1 text-[11px] ${k.borde} ${k.suave}`}>sobre {(c.peso * 0.2).toFixed(2)}</p>
+                      </div>
+                    ))}
+                  </div>
 
-                <div className="rounded-2xl bg-emerald-50 p-4">
-                  <p className="text-xs font-semibold text-emerald-600">
-                    Evidencias aprobadas
-                  </p>
-                  <p className="mt-2 text-4xl font-extrabold text-emerald-800">
-                    {avanceEvidencias}%
-                  </p>
-                  <p className="mt-1 text-xs text-emerald-700">
-                    {evidenciasElegidas.length} elegidas · {tareasAprobadas} de{" "}
-                    {tareasActuales.length} aprobadas
-                  </p>
-                </div>
-              </div>
+                  {/* Fila "Máximo posible" (el "Class Average" de Classroom) */}
+                  <div className={`grid grid-cols-[240px_130px_repeat(5,minmax(130px,1fr))] border-b ${k.borde} ${k.relleno}`}>
+                    <div className={`flex items-center gap-3 p-4 text-sm font-medium ${k.acento}`}>
+                      <Users size={20} /> Máximo posible
+                    </div>
+                    <div className={`flex items-center border-l p-4 text-sm ${k.borde} ${k.suave}`}>20 · mín. 13</div>
+                    {CRITERIOS.map((c) => (
+                      <div key={c.id} className={`flex items-center border-l p-4 text-sm ${k.borde} ${k.suave}`}>{(c.peso * 0.2).toFixed(2)}</div>
+                    ))}
+                  </div>
 
-              <div className="mt-5">
-                <h3 className="text-sm font-bold">Desglose de criterios</h3>
-
-                <div className="mt-3 space-y-4">
-                  {CRITERIOS.map((criterio) => {
-                    const nivel = Number(evaluacionActual[criterio.id] || 0);
-                    const puntos = (nivel / 4) * criterio.peso * 0.2;
-
+                  {/* Un renglón por módulo */}
+                  {modulosEstudiante.map((m) => {
+                    const num = Number(m.numero_modulo);
+                    const esActivo = num === Number(moduloActivo.numero_modulo);
+                    const niveles = nivelesPorModulo[num] || {};
+                    const nota = notaDeModulo(m);
                     return (
-                      <div key={criterio.id}>
-                        <div className="mb-1.5 flex items-center justify-between gap-3">
-                          <span className="text-xs font-semibold">
-                            {criterio.nombre}
+                      <div
+                        key={num}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => { elegirModulo(num); setSeccion("evaluacion"); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") { elegirModulo(num); setSeccion("evaluacion"); } }}
+                        className={`relative grid cursor-pointer grid-cols-[240px_130px_repeat(5,minmax(130px,1fr))] border-b transition last:border-b-0 ${k.borde} ${k.hover}`}
+                      >
+                        {esActivo && <span className={`absolute inset-y-0 left-0 w-1 ${k.barra}`} />}
+                        <div className="flex items-center gap-3 p-4">
+                          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-medium ${m.adjuntado ? "bg-[#188038] text-white" : "bg-[#e8f0fe] text-[#1a73e8]"}`}>
+                            {m.adjuntado ? <Check size={18} /> : ROMANOS[num - 1] || num}
                           </span>
-                          <span className="text-xs font-bold text-blue-600">
-                            {nivel ? puntos.toFixed(2) : "—"} pts
+                          <span className="min-w-0 text-sm">
+                            <span className="block truncate">{m.nombre_modulo}</span>
+                            <span className={`block truncate text-xs ${k.suave}`}>{esActivo ? "Revisando ahora" : m.docente_asignado}</span>
                           </span>
                         </div>
 
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                          <div
-                            className="h-full rounded-full bg-blue-600 transition-all"
-                            style={{ width: `${(nivel / 4) * 100}%` }}
-                          />
+                        <div className={`flex items-center border-l p-4 text-sm ${k.borde}`}>
+                          {nota === null ? (
+                            <span className={k.suave}>Sin nota</span>
+                          ) : (
+                            <span>
+                              {formatoNota(nota)} <span className={`text-xs ${k.suave}`}>({Math.round((nota / 20) * 100)}%)</span>
+                            </span>
+                          )}
                         </div>
+
+                        {CRITERIOS.map((c) => {
+                          const nivel = Number(niveles[c.id] || 0);
+                          const pts = (nivel / 4) * c.peso * 0.2;
+                          return (
+                            <div key={c.id} className={`flex flex-col justify-center border-l p-4 text-sm ${k.borde}`}>
+                              {nivel === 0 ? (
+                                <span className="text-[#d93025]">Sin evaluar</span>
+                              ) : (
+                                <>
+                                  <span className={nivel >= 3 ? k.acento : ""}>{NIVELES[nivel - 1].nombre}</span>
+                                  <span className={`text-xs ${k.suave}`}>{pts.toFixed(2)} pts</span>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })}
@@ -1789,234 +2074,155 @@ export default function DetalleRevisionEstudiante({
               </div>
             </section>
 
-            <aside className="space-y-4">
-              <div
-                className={`rounded-2xl border p-5 shadow-sm ${surface}`}
-              >
-                <div className="flex items-center gap-2">
-                  <Award className="text-amber-500" size={20} />
-                  <h3 className="text-sm font-bold">Estado de constancia</h3>
+            <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+              <section className={`rv-up rounded-lg border p-5 ${k.tarjeta}`}>
+                <h2 className="text-base font-medium">Perfil de desempeño</h2>
+                <p className={`text-sm ${k.suave}`}>
+                  {moduloActivo.nombre_modulo} · Asesor: {moduloActivo.docente_asignado} · {empresaActual}
+                </p>
+
+                <div className="mt-4 grid grid-cols-1 items-center gap-6 md:grid-cols-[260px_1fr]">
+                  <RadarCriterios valores={valoresRadar} />
+                  <div className="flex items-center justify-center gap-6">
+                    <AnilloNota nota={notaCalculada} aprobado={notaAprobatoria} size={150} />
+                  </div>
                 </div>
 
-                <div className="mt-4 rounded-xl bg-slate-50 p-4 text-center">
-                  <p
-                    className={`text-lg font-extrabold ${
-                      listoParaConstancia
-                        ? "text-emerald-600"
-                        : "text-amber-600"
-                    }`}
-                  >
-                    {listoParaConstancia
-                      ? "Listo para constancia"
-                      : "Aún no listo para constancia"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
+                {(logros[claveModulo] || mejoras[claveModulo] || observaciones[claveModulo]) && (
+                  <div className={`mt-5 grid grid-cols-1 gap-3 border-t pt-4 md:grid-cols-3 ${k.borde}`}>
+                    {[
+                      { t: "Logros", v: logros[claveModulo] },
+                      { t: "Por mejorar", v: mejoras[claveModulo] },
+                      { t: "Observaciones", v: observaciones[claveModulo] },
+                    ].map(
+                      (b) =>
+                        b.v && (
+                          <div key={b.t}>
+                            <p className={`text-xs font-medium ${k.acento}`}>{b.t}</p>
+                            <p className={`mt-1 whitespace-pre-wrap text-sm leading-relaxed ${k.suave}`}>{b.v}</p>
+                          </div>
+                        )
+                    )}
+                  </div>
+                )}
+              </section>
+
+              <aside className={`rv-up rounded-lg border p-5 ${k.tarjeta}`} style={{ animationDelay: "60ms" }}>
+                <div className="flex items-center gap-2">
+                  <Award className="text-[#f29900]" size={19} />
+                  <h3 className="text-base font-medium">Estado de constancia</h3>
+                </div>
+
+                <div className={`mt-4 rounded-md p-4 text-center ${listoParaConstancia ? "bg-[#e6f4ea] text-[#137333]" : `${k.relleno}`}`}>
+                  <p className="text-base font-medium">{listoParaConstancia ? "Listo para constancia" : "Aún no listo"}</p>
+                  <p className={`mt-1 text-xs ${listoParaConstancia ? "" : k.suave}`}>
                     Requiere nota ≥ 13, evidencia, portafolio conforme y verificación docente.
                   </p>
                 </div>
 
-                <div className="mt-4 space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-slate-500">
-                      <CheckCircle2 size={15} />
-                      Rúbrica completa
-                    </span>
-                    <strong>
-                      {criteriosCompletados === CRITERIOS.length ? "Sí" : "No"}
-                    </strong>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-slate-500">
-                      <UserCheck size={15} />
-                      Verificado por docente
-                    </span>
-                    <strong>{verificadoDocenteActual ? "Sí" : "No"}</strong>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-slate-500">
-                      <FolderCheck size={15} />
-                      Portafolio conforme
-                    </span>
-                    <strong>{portafolioConforme ? "Sí" : "No"}</strong>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-slate-500">
-                      <LockKeyhole size={15} />
-                      Expediente ({moduloActivo.nombre_modulo})
-                    </span>
-                    <strong>
-                      {moduloYaCalificado ? "Adjuntado" : "Pendiente"}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className={`rounded-2xl border p-5 ${surface}`}>
-                <h3 className="text-sm font-bold">Siguiente paso</h3>
-                <p className={`mt-2 text-xs leading-relaxed ${muted}`}>
-                  Al registrar en el expediente, el módulo quedará guardado con su calificación y estado de constancia para el administrador.
-                </p>
+                <ul className="mt-4 space-y-2.5">
+                  {[
+                    { l: "Rúbrica completa", ok: criteriosCompletados === CRITERIOS.length, i: CheckCircle2 },
+                    ...pasos.map((p) => ({ l: p.titulo, ok: p.ok, i: p.icono })),
+                    { l: `Expediente (${moduloActivo.nombre_modulo})`, ok: moduloYaCalificado, i: LockKeyhole, t: moduloYaCalificado ? "Adjuntado" : "Pendiente" },
+                  ].map((r) => {
+                    const Ic = r.i;
+                    return (
+                      <li key={r.l} className="flex items-center justify-between text-sm">
+                        <span className={`flex items-center gap-2 ${k.suave}`}>
+                          <Ic size={15} />
+                          {r.l}
+                        </span>
+                        <span className={r.ok ? `font-medium ${k.acento}` : k.suave}>{r.t || (r.ok ? "Sí" : "No")}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
 
                 <button
                   type="button"
                   onClick={() => setSeccion("evaluacion")}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                  className={`mt-5 flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium transition ${k.borde} ${k.hover} ${k.acento}`}
                 >
                   Revisar evaluación
-                  <ChevronRight size={15} />
+                  <ChevronRight size={16} />
                 </button>
-              </div>
-            </aside>
-          </div>
-        )}
-
-        <div
-          className={`sticky bottom-2 z-20 flex flex-col justify-between gap-3 rounded-2xl border p-3 shadow-lg sm:flex-row sm:items-center sm:px-5 ${surface}`}
-        >
-          <div className="flex items-center gap-2">
-            {moduloYaCalificado ? (
-              <LockKeyhole size={18} className="text-emerald-600" />
-            ) : (
-              <Save size={18} className="text-blue-600" />
-            )}
-
-            <div>
-              <p className="text-xs font-bold">
-                {moduloYaCalificado
-                  ? `Evaluación registrada · ${moduloActivo.nombre_modulo}`
-                  : `¿Terminaste la evaluación del ${moduloActivo.nombre_modulo}?`}
-              </p>
-              <p className={`mt-0.5 text-[11px] ${muted}`}>
-                {moduloYaCalificado
-                  ? "Esta evaluación ya fue adjuntada al expediente de este módulo."
-                  : `${evidenciasElegidas.length} evidencias elegidas · ${
-                      listoParaConstancia
-                        ? "Listo para constancia"
-                        : "Revisa requisitos de constancia"
-                    }`}
-              </p>
+              </aside>
             </div>
           </div>
+        )}
+      </main>
 
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
-            <button
-              type="button"
-              onClick={() => setSeccion("resultados")}
-              className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
-            >
-              Ver resultados
-            </button>
-
-            <button
-              type="button"
-              onClick={guardarCalificacion}
-              disabled={
-                guardando ||
-                moduloYaCalificado ||
-                criteriosCompletados !== CRITERIOS.length
-              }
-              className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {guardando ? (
-                <RefreshCw className="animate-spin" size={16} />
-              ) : (
-                <Send size={16} />
-              )}
-              {guardando
-                ? "Guardando..."
-                : moduloYaCalificado
-                  ? "Evaluación registrada"
-                  : "Registrar en expediente"}
-            </button>
-          </div>
-        </div>
-      </div>
-
+      {/* Nueva evidencia */}
       {modalEvidencia && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-3 backdrop-blur-sm">
-          <div className="my-auto w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between bg-[#173c83] p-5 text-white">
-              <div>
-                <h2 className="font-bold">
-                  Asignar nueva evidencia · {moduloActivo.nombre_modulo}
-                </h2>
-                <p className="mt-1 text-xs text-blue-100">
-                  Actividad para {estudiante.nombre}
-                </p>
-              </div>
-
+        <div className="rv-fade fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-3">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="nueva-evidencia-titulo"
+            className={`rv-up my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-lg shadow-2xl ${k.pagina}`}
+          >
+            <div className={`flex items-center gap-3 border-b px-4 py-3 ${k.borde}`}>
               <button
                 type="button"
                 onClick={() => setModalEvidencia(false)}
-                className="rounded-lg p-2 transition hover:bg-white/15"
+                className={`grid h-10 w-10 place-items-center rounded-full transition ${k.hover}`}
                 aria-label="Cerrar"
               >
-                <X size={19} />
+                <X size={20} />
               </button>
+              <div className="min-w-0">
+                <h2 id="nueva-evidencia-titulo" className="truncate text-lg font-normal">Nueva evidencia</h2>
+                <p className={`truncate text-xs ${k.suave}`}>{moduloActivo.nombre_modulo} · {estudiante.nombre}</p>
+              </div>
             </div>
 
             <form onSubmit={crearEvidencia} className="space-y-4 p-5">
-              <Campo label="Nombre de la evidencia *">
+              <CampoRelleno etiqueta="Título *" k={k}>
                 <input
                   autoFocus
                   value={nuevaEvidencia.titulo}
-                  onChange={(e) =>
-                    setNuevaEvidencia((prev) => ({
-                      ...prev,
-                      titulo: e.target.value,
-                    }))
-                  }
+                  onChange={(e) => setNuevaEvidencia((prev) => ({ ...prev, titulo: e.target.value }))}
                   placeholder="Ej. Informe de actividades del módulo"
-                  className={inputRevisionClass}
+                  className={`${inpBase} text-base`}
                   required
                 />
-              </Campo>
+              </CampoRelleno>
 
-              <Campo label="Descripción e indicaciones">
+              <CampoRelleno etiqueta="Instrucciones (opcional)" k={k}>
                 <textarea
                   rows={4}
                   value={nuevaEvidencia.descripcion}
-                  onChange={(e) =>
-                    setNuevaEvidencia((prev) => ({
-                      ...prev,
-                      descripcion: e.target.value,
-                    }))
-                  }
-                  placeholder="Describe qué debe presentar el estudiante..."
-                  className={inputRevisionClass}
+                  onChange={(e) => setNuevaEvidencia((prev) => ({ ...prev, descripcion: e.target.value }))}
+                  placeholder="Describe qué debe presentar el estudiante…"
+                  className={`${inpBase} resize-none`}
                 />
-              </Campo>
+              </CampoRelleno>
 
-              <Campo label="Fecha límite de entrega">
-                <input
-                  type="date"
-                  min={fechaActual()}
-                  value={nuevaEvidencia.fechaLimite}
-                  onChange={(e) =>
-                    setNuevaEvidencia((prev) => ({
-                      ...prev,
-                      fechaLimite: e.target.value,
-                    }))
-                  }
-                  className={inputRevisionClass}
-                />
-              </Campo>
+              <CampoRelleno etiqueta="Fecha límite de entrega" k={k}>
+                <div className="flex items-center gap-2">
+                  <CalendarDays size={16} className={k.suave} />
+                  <input
+                    type="date"
+                    min={fechaActual()}
+                    value={nuevaEvidencia.fechaLimite}
+                    onChange={(e) => setNuevaEvidencia((prev) => ({ ...prev, fechaLimite: e.target.value }))}
+                    className={inpBase}
+                  />
+                </div>
+              </CampoRelleno>
 
-              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setModalEvidencia(false)}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  className={`rounded-full px-5 py-2.5 text-sm font-medium transition ${k.hover} ${k.acento}`}
                 >
                   Cancelar
                 </button>
-
                 <button
                   type="submit"
-                  className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#188038] px-6 py-2.5 text-sm font-medium text-white transition hover:bg-[#137333] hover:shadow-md"
                 >
                   <Plus size={16} />
                   Crear y asignar

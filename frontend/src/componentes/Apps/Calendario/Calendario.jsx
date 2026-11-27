@@ -1,15 +1,63 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight, Plus, X, Check, Trash2 } from "lucide-react";
+import api, { getCachedData, invalidateApiCache } from "../../../api/axios";
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
-// Mismos colores del dashboard: azul principal, verde, ámbar y violeta
 const TIPOS = {
   Reunión: { punto: "bg-blue-600", barra: "border-l-blue-600", claro: "bg-blue-50 text-blue-700", oscuro: "bg-blue-500/15 text-blue-300" },
   Entrega: { punto: "bg-amber-500", barra: "border-l-amber-500", claro: "bg-amber-50 text-amber-700", oscuro: "bg-amber-500/15 text-amber-300" },
   Visita: { punto: "bg-emerald-500", barra: "border-l-emerald-500", claro: "bg-emerald-50 text-emerald-700", oscuro: "bg-emerald-500/15 text-emerald-300" },
   Otro: { punto: "bg-violet-500", barra: "border-l-violet-500", claro: "bg-violet-50 text-violet-700", oscuro: "bg-violet-500/15 text-violet-300" },
+};
+
+// La base guarda hora como 09:00:00; la pantalla usa 09:00
+const deEvento = (r) => ({
+  id: r.id_evento ?? r.id,
+  titulo: r.titulo,
+  fecha: String(r.fecha).slice(0, 10),
+  inicio: String(r.hora_inicio || "09:00").slice(0, 5),
+  fin: String(r.hora_fin || "10:00").slice(0, 5),
+  tipo: TIPOS[r.tipo] ? r.tipo : "Reunión",
+  nota: r.nota ?? "",
+});
+
+const aEvento = (e) => ({
+  titulo: e.titulo,
+  fecha: e.fecha,
+  hora_inicio: e.inicio,
+  hora_fin: e.fin,
+  tipo: e.tipo,
+  nota: e.nota || null,
+});
+
+const deTarea = (r) => ({
+  id: r.id_tarea ?? r.id,
+  texto: r.texto,
+  hecha: Boolean(r.hecha),
+});
+
+const parsearPayloadCalendario = (raw) => {
+  const data = raw?.data && !Array.isArray(raw.data) && (raw.data.eventos || raw.data.tareas || raw.data.notas !== undefined)
+    ? raw.data
+    : raw;
+  return {
+    eventos: (data?.eventos ?? []).map(deEvento),
+    tareas: (data?.tareas ?? []).map(deTarea),
+    notas: data?.notas ?? "",
+  };
+};
+
+const mensajeDe = (err) => {
+  const msg =
+    err?.response?.data?.message ||
+    err?.response?.data?.error ||
+    err?.message ||
+    "Error al conectar con el servidor";
+  return /uq_evento_repetido|duplicate/i.test(msg)
+    ? "Ya tienes un evento con ese título a esa hora."
+    : msg;
 };
 
 /* ---------- Fechas ---------- */
@@ -33,32 +81,6 @@ const duracion = (i, f) => {
   return h && m ? `${h} h ${m} min` : h ? `${h} h` : `${m} min`;
 };
 
-/* ---------- Datos guardados en este navegador ---------- */
-const leer = (llave, porDefecto) => {
-  try {
-    const g = JSON.parse(localStorage.getItem(llave));
-    if (g !== null && g !== undefined) return g;
-  } catch { /* sin datos */ }
-  return porDefecto;
-};
-
-const eventosDemo = () => {
-  const hoy = new Date();
-  return [
-    { id: 1, titulo: "Reunión con asesores", fecha: clave(hoy), inicio: "15:00", fin: "16:00", tipo: "Reunión", nota: "Revisión del avance de prácticas." },
-    { id: 2, titulo: "Entrega de bitácoras", fecha: clave(sumarDias(hoy, 2)), inicio: "08:00", fin: "12:00", tipo: "Entrega", nota: "" },
-    { id: 3, titulo: "Visita a Tech Solutions Perú", fecha: clave(sumarDias(hoy, 4)), inicio: "10:00", fin: "12:30", tipo: "Visita", nota: "Supervisión de los alumnos en la entidad." },
-    { id: 4, titulo: "Revisión de informes parciales", fecha: clave(sumarDias(hoy, 4)), inicio: "15:00", fin: "17:00", tipo: "Otro", nota: "" },
-    { id: 5, titulo: "Cierre de plazo de informes", fecha: clave(sumarDias(hoy, 9)), inicio: "23:00", fin: "23:59", tipo: "Entrega", nota: "" },
-  ];
-};
-
-const tareasDemo = () => [
-  { id: 1, texto: "Revisar bitácoras pendientes", hecha: false },
-  { id: 2, texto: "Confirmar visita a la entidad", hecha: false },
-  { id: 3, texto: "Enviar informe a coordinación", hecha: true },
-];
-
 const estilos = `
 @keyframes cal-subir{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes cal-fade{from{opacity:0}to{opacity:1}}
@@ -69,17 +91,23 @@ const estilos = `
 
 export default function Calendario({ darkMode }) {
   const hoyClave = clave(new Date());
+  const cachedInit = getCachedData("/calendario");
+  const parsedInit = cachedInit ? parsearPayloadCalendario(cachedInit) : null;
+
   const [ahora, setAhora] = useState(new Date());
   const [mes, setMes] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [seleccion, setSeleccion] = useState(hoyClave);
-  const [eventos, setEventos] = useState(() => { const g = leer("calendario_eventos", null); return Array.isArray(g) ? g : eventosDemo(); });
-  const [tareas, setTareas] = useState(() => { const g = leer("calendario_tareas", null); return Array.isArray(g) ? g : tareasDemo(); });
-  const [notas, setNotas] = useState(() => leer("calendario_notas", ""));
+  const [eventos, setEventos] = useState(parsedInit?.eventos ?? []);
+  const [tareas, setTareas] = useState(parsedInit?.tareas ?? []);
+  const [notas, setNotas] = useState(parsedInit?.notas ?? "");
   const [nuevaTarea, setNuevaTarea] = useState("");
   const [modal, setModal] = useState(null);
   const [error, setError] = useState("");
+  const [fallo, setFallo] = useState("");
+  const [cargando, setCargando] = useState(!parsedInit);
+  const notasListas = useRef(false);
+  const ultimaNota = useRef(parsedInit?.notas ?? "");
 
-  // Todos los colores salen de aquí para que combine en claro y oscuro
   const t = darkMode
     ? { texto: "text-slate-100", suave: "text-slate-400", tarjeta: "bg-slate-900 border-slate-800", fondo: "bg-slate-900", linea: "border-slate-800", rejilla: "bg-slate-800",
         fuera: "bg-slate-950/60", hover: "hover:bg-slate-800/60", sel: "bg-blue-500/10", cabeza: "bg-slate-800/50", divisor: "divide-slate-800",
@@ -92,9 +120,37 @@ export default function Calendario({ darkMode }) {
   const entrada = `w-full rounded-xl border px-3.5 py-2.5 text-xs outline-none transition-all ${t.entrada}`;
 
   useEffect(() => { const id = setInterval(() => setAhora(new Date()), 30000); return () => clearInterval(id); }, []);
-  useEffect(() => { try { localStorage.setItem("calendario_eventos", JSON.stringify(eventos)); } catch { /* ignorar */ } }, [eventos]);
-  useEffect(() => { try { localStorage.setItem("calendario_tareas", JSON.stringify(tareas)); } catch { /* ignorar */ } }, [tareas]);
-  useEffect(() => { try { localStorage.setItem("calendario_notas", JSON.stringify(notas)); } catch { /* ignorar */ } }, [notas]);
+
+  useEffect(() => {
+    let vivo = true;
+    api.get("/calendario")
+      .then((res) => {
+        if (!vivo) return;
+        const { eventos: ev, tareas: ta, notas: no } = parsearPayloadCalendario(res.data);
+        setEventos(ev);
+        setTareas(ta);
+        setNotas(no);
+        ultimaNota.current = no;
+        notasListas.current = true;
+      })
+      .catch((e) => vivo && setFallo(mensajeDe(e)))
+      .finally(() => vivo && setCargando(false));
+    return () => { vivo = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!notasListas.current || notas === ultimaNota.current) return;
+    const id = setTimeout(() => {
+      api.put("/calendario/notas", { contenido: notas })
+        .then(() => {
+          ultimaNota.current = notas;
+          invalidateApiCache("/calendario");
+        })
+        .catch((e) => setFallo(mensajeDe(e)));
+    }, 600);
+    return () => clearTimeout(id);
+  }, [notas]);
+
   useEffect(() => {
     if (!modal) return;
     const cerrar = (e) => e.key === "Escape" && setModal(null);
@@ -104,7 +160,6 @@ export default function Calendario({ darkMode }) {
 
   const delDia = (k) => eventos.filter((e) => e.fecha === k).sort((a, b) => a.inicio.localeCompare(b.inicio));
 
-  // Eventos que vienen (para "Recordatorios" y "Próximo")
   const venideros = eventos
     .map((e) => ({ ...e, ini: new Date(`${e.fecha}T${e.inicio}`) }))
     .filter((e) => e.ini > ahora)
@@ -127,23 +182,113 @@ export default function Calendario({ darkMode }) {
 
   const abrirNuevo = (fecha) => { setError(""); setModal({ titulo: "", fecha, inicio: "09:00", fin: "10:00", tipo: "Reunión", nota: "" }); };
 
+  // Actualización optimista: se muestra al instante y sincroniza en segundo plano
   const guardar = () => {
     if (!modal.titulo.trim()) return setError("Escribe un título para el evento.");
     if (!modal.fecha) return setError("Elige una fecha.");
     if (modal.fin <= modal.inicio) return setError("La hora de fin debe ser posterior a la de inicio.");
+
     const datos = { ...modal, titulo: modal.titulo.trim() };
-    setEventos((prev) => (modal.id ? prev.map((e) => (e.id === modal.id ? datos : e)) : [...prev, { ...datos, id: Date.now() }]));
-    irAFecha(modal.fecha);
+    setError("");
+
+    if (modal.id) {
+      const anterior = eventos.find((e) => e.id === modal.id);
+      setEventos((prev) => prev.map((e) => (e.id === modal.id ? { ...datos } : e)));
+      irAFecha(datos.fecha);
+      setModal(null);
+
+      api.patch(`/calendario/eventos/${datos.id}`, aEvento(datos))
+        .then((res) => {
+          const guardado = deEvento(res.data?.data ?? res.data);
+          setEventos((prev) => prev.map((e) => (e.id === datos.id ? guardado : e)));
+          invalidateApiCache("/calendario");
+        })
+        .catch((e) => {
+          if (anterior) {
+            setEventos((prev) => prev.map((ev) => (ev.id === anterior.id ? anterior : ev)));
+          }
+          setFallo(mensajeDe(e));
+        });
+      return;
+    }
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setEventos((prev) => [...prev, { ...datos, id: tempId }]);
+    irAFecha(datos.fecha);
     setModal(null);
+
+    api.post("/calendario/eventos", aEvento(datos))
+      .then((res) => {
+        const guardado = deEvento(res.data?.data ?? res.data);
+        setEventos((prev) => prev.map((e) => (e.id === tempId ? guardado : e)));
+        invalidateApiCache("/calendario");
+      })
+      .catch((e) => {
+        setEventos((prev) => prev.filter((ev) => ev.id !== tempId));
+        setFallo(mensajeDe(e));
+      });
   };
-  const eliminar = () => { setEventos((prev) => prev.filter((e) => e.id !== modal.id)); setModal(null); };
+
+  const eliminar = () => {
+    const idBorrar = modal.id;
+    const respaldo = eventos;
+    setEventos((prev) => prev.filter((e) => e.id !== idBorrar));
+    setModal(null);
+
+    api.delete(`/calendario/eventos/${idBorrar}`)
+      .then(() => invalidateApiCache("/calendario"))
+      .catch((e) => {
+        setEventos(respaldo);
+        setFallo(mensajeDe(e));
+      });
+  };
 
   const agregarTarea = (e) => {
     e.preventDefault();
-    if (!nuevaTarea.trim()) return;
-    setTareas((prev) => [...prev, { id: Date.now(), texto: nuevaTarea.trim(), hecha: false }]);
+    const texto = nuevaTarea.trim();
+    if (!texto) return;
+
+    const tempId = `temp-tarea-${Date.now()}`;
     setNuevaTarea("");
+    setTareas((prev) => [...prev, { id: tempId, texto, hecha: false }]);
+
+    api.post("/calendario/tareas", { texto })
+      .then((res) => {
+        const creada = deTarea(res.data?.data ?? res.data);
+        setTareas((prev) => prev.map((tItem) => (tItem.id === tempId ? creada : tItem)));
+        invalidateApiCache("/calendario");
+      })
+      .catch((err) => {
+        setTareas((prev) => prev.filter((tItem) => tItem.id !== tempId));
+        setFallo(mensajeDe(err));
+        setNuevaTarea(texto);
+      });
   };
+
+  const alternarTarea = (x) => {
+    const siguienteEstado = !x.hecha;
+    setTareas((prev) => prev.map((y) => (y.id === x.id ? { ...y, hecha: siguienteEstado } : y)));
+
+    api.patch(`/calendario/tareas/${x.id}`, { hecha: siguienteEstado })
+      .then(() => invalidateApiCache("/calendario"))
+      .catch((err) => {
+        setFallo(mensajeDe(err));
+        setTareas((prev) => prev.map((y) => (y.id === x.id ? { ...y, hecha: x.hecha } : y)));
+      });
+  };
+
+  const quitarTarea = (x) => {
+    const antes = tareas;
+    setTareas((prev) => prev.filter((y) => y.id !== x.id));
+
+    api.delete(`/calendario/tareas/${x.id}`)
+      .then(() => invalidateApiCache("/calendario"))
+      .catch((err) => {
+        setFallo(mensajeDe(err));
+        setTareas(antes);
+      });
+  };
+
   const hechas = tareas.filter((x) => x.hecha).length;
 
   const agenda = delDia(seleccion);
@@ -154,21 +299,28 @@ export default function Calendario({ darkMode }) {
     <div className={`cal space-y-4 text-xs transition-colors ${t.texto}`}>
       <style>{estilos}</style>
 
-      {/* Título */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-extrabold tracking-tight">Calendario</h1>
-          <p className={`mt-0.5 ${t.suave}`}>Reuniones, entregas y visitas de las prácticas EFSRT.</p>
+          <p className={`mt-0.5 ${t.suave}`}>
+            Reuniones, entregas y visitas de las prácticas EFSRT.
+            {cargando && <span className="ml-2 inline-block animate-pulse text-blue-600">Sincronizando…</span>}
+          </p>
         </div>
         <button onClick={() => abrirNuevo(seleccion)} className="flex cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-md shadow-blue-600/25 transition-all hover:-translate-y-0.5 hover:bg-blue-700 active:translate-y-0 active:scale-95">
           <Plus size={16} /> Nuevo evento
         </button>
       </div>
 
-      {/* Calendario + panel lateral estilo agenda */}
+      {fallo && (
+        <div role="alert" style={{ animation: "cal-subir .25s ease both" }} className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-2.5 ${darkMode ? "border-red-500/30 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
+          <span>{fallo}</span>
+          <button onClick={() => setFallo("")} aria-label="Cerrar aviso" className="cursor-pointer"><X size={14} /></button>
+        </div>
+      )}
+
       <div className="grid items-start gap-4 xl:grid-cols-[1fr_310px]">
         <section style={{ animation: "cal-subir .4s ease both" }} className={`overflow-hidden rounded-2xl border ${t.tarjeta}`}>
-          {/* Año, mes grande y navegación */}
           <div className="relative flex items-center justify-center px-5 pb-3 pt-4">
             <span className={`absolute left-5 top-4 text-sm font-bold ${t.suave}`}>{mes.getFullYear()}</span>
             <div className="flex items-center gap-4">
@@ -179,7 +331,6 @@ export default function Calendario({ darkMode }) {
             <button onClick={irHoy} className={`absolute right-5 top-4 cursor-pointer rounded-lg border px-3 py-1.5 font-medium transition-colors ${t.boton}`}>Hoy</button>
           </div>
 
-          {/* Cuadrícula tipo planner: celdas con borde */}
           <div className={`border-y ${t.linea}`}>
             <div className={`grid grid-cols-7 gap-px ${t.rejilla}`}>
               {DIAS.map((d) => (
@@ -231,7 +382,6 @@ export default function Calendario({ darkMode }) {
           </div>
         </section>
 
-        {/* Panel lateral: ahora, recordatorios, tareas y notas */}
         <aside className="space-y-4">
           <div style={{ animation: "cal-subir .4s ease .05s both" }} className={`rounded-2xl border p-4 ${t.tarjeta}`}>
             <div className="flex items-start justify-between gap-3">
@@ -283,14 +433,14 @@ export default function Calendario({ darkMode }) {
               {tareas.map((x) => (
                 <li key={x.id} className={`group flex items-center gap-3 rounded-lg px-2 py-1.5 ${t.hover}`}>
                   <button
-                    onClick={() => setTareas((prev) => prev.map((y) => (y.id === x.id ? { ...y, hecha: !y.hecha } : y)))}
+                    onClick={() => alternarTarea(x)}
                     aria-label="Marcar tarea"
                     className={`flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded border transition-all ${x.hecha ? "border-emerald-500 bg-emerald-500 text-white" : darkMode ? "border-slate-600" : "border-slate-300"}`}
                   >
                     {x.hecha && <Check size={11} strokeWidth={3} />}
                   </button>
                   <span className={`flex-1 transition-colors ${x.hecha ? `line-through ${t.suave}` : ""}`}>{x.texto}</span>
-                  <button onClick={() => setTareas((prev) => prev.filter((y) => y.id !== x.id))} aria-label="Eliminar tarea" className={`cursor-pointer opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100 ${t.suave}`}><Trash2 size={13} /></button>
+                  <button onClick={() => quitarTarea(x)} aria-label="Eliminar tarea" className={`cursor-pointer opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100 ${t.suave}`}><Trash2 size={13} /></button>
                 </li>
               ))}
             </ul>
@@ -313,7 +463,6 @@ export default function Calendario({ darkMode }) {
         </aside>
       </div>
 
-      {/* Agenda del día seleccionado */}
       <section style={{ animation: "cal-subir .4s ease .1s both" }} className={`rounded-2xl border ${t.tarjeta}`}>
         <div className={`flex items-center justify-between gap-3 border-b px-5 py-4 ${t.linea}`}>
           <div>
@@ -353,7 +502,6 @@ export default function Calendario({ darkMode }) {
         )}
       </section>
 
-      {/* Formulario */}
       {modal && (
         <div style={{ animation: "cal-fade .2s ease both" }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={() => setModal(null)}>
           <div style={{ animation: "cal-entra .25s ease both" }} className={`w-full max-w-md overflow-hidden rounded-2xl border shadow-2xl ${t.tarjeta} ${t.texto}`} onClick={(e) => e.stopPropagation()}>

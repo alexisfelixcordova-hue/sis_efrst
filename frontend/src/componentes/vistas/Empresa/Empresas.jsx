@@ -1,10 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import api, { invalidateApiCache } from '../../../api/axios.js';
 
-const API_URL = 'http://127.0.0.1:8000/api';
 const POR_PAGINA = 6;
 const CACHE_DURACION = 30 * 60 * 1000;
 const CACHE_EMPRESAS = 'empresas_convenio_cache_v1';
+const CANAL_SYNC_EMPRESAS = 'efsrt_empresas_asignadas_sync_v1';
+const KEY_SNAPSHOT_EMPRESAS_REALTIME = 'efsrt_empresas_realtime_snapshot_v1';
+
+const idEmpDe = (emp) => String(emp?.id_empresa ?? emp?.id ?? '');
+const idEstDe = (est) =>
+    String(
+        est?.id_estudiante ??
+            est?.estudiante_id ??
+            est?.alumno_id ??
+            est?.estudiante?.id_estudiante ??
+            est?.estudiante?.id ??
+            est?.id ??
+            ''
+    );
 
 const leerCache = (clave) => {
     try {
@@ -99,7 +112,7 @@ const inicialesEmpresa = (nombre) => {
 };
 const colorAvatar = (id) => coloresAvatar[Number(id) % coloresAvatar.length] || coloresAvatar[0];
 const inicialesPersona = (e) =>
-    `${(e.nombres || '?').trim().charAt(0)}${(e.apellidos || '').trim().charAt(0)}`.toUpperCase();
+    `${(e.nombres || e.nombre || '?').trim().charAt(0)}${(e.apellidos || '').trim().charAt(0)}`.toUpperCase();
 
 const useContador = (objetivo, duracion = 800) => {
     const [valor, setValor] = useState(0);
@@ -117,7 +130,6 @@ const useContador = (objetivo, duracion = 800) => {
     return valor;
 };
 
-// Las barras arrancan en 0 y crecen al aparecer
 const useMontado = () => {
     const [m, setM] = useState(false);
     useEffect(() => { const id = setTimeout(() => setM(true), 60); return () => clearTimeout(id); }, []);
@@ -144,7 +156,6 @@ const reducirSerie = (serie, max = 14) => {
     return Array.from({ length: max }, (_, i) => serie[Math.round(i * paso)]);
 };
 
-/* Cifra de la franja de estadísticas (sin barras ni bordes de color) */
 const TarjetaResumen = ({ titulo, valor, sufijo = '', icono, color, spark, sparkColor, pie, retraso }) => {
     const animado = useContador(valor);
     return (
@@ -232,7 +243,6 @@ const Campo = ({ label, requerido, extra, children }) => (
     </div>
 );
 
-/* Sección numerada del formulario: el círculo se marca al completarla */
 const Seccion = ({ n, titulo, detalle, hecha, ultima, children }) => (
     <section className="relative pl-12">
         {!ultima && <span className="absolute left-[15px] top-9 bottom-[-28px] w-px bg-slate-200" />}
@@ -247,7 +257,6 @@ const Seccion = ({ n, titulo, detalle, hecha, ultima, children }) => (
     </section>
 );
 
-/* Panel lateral deslizante */
 const PanelLateral = ({ titulo, subtitulo, onCerrar, pie, children, cabecera }) => (
     <div className="fixed inset-0 z-50 flex justify-end">
         <div className="em-fade absolute inset-0 bg-slate-900/40" onClick={onCerrar} />
@@ -316,8 +325,78 @@ export default function Empresas() {
     const [filtro, setFiltro] = useState('todas');
     const [orden, setOrden] = useState({ campo: 'razon_social', dir: 'asc' });
     const [pagina, setPagina] = useState(1);
+    const aplicarAsignacionesEnTiempoReal = useCallback((detalle, refrescarApi = false) => {
+        if (!detalle || !Array.isArray(detalle.asignaciones)) return;
 
-    const tokenSesion = localStorage.getItem('token');
+        const alcance =
+            detalle.alcanceKey ||
+            `${String(detalle.id_docente || 'none')}::${String(detalle.id_modulo || '1')}::${String(detalle.anio || '')}`;
+
+        setEmpresas((prevEmpresas) => {
+            const base = Array.isArray(prevEmpresas) ? prevEmpresas : [];
+
+            const porEmpresaMap = new Map();
+            detalle.asignaciones.forEach((asig) => {
+                const empKey = String(asig?.id_empresa ?? '');
+                if (!empKey) return;
+                if (!porEmpresaMap.has(empKey)) porEmpresaMap.set(empKey, []);
+                porEmpresaMap.get(empKey).push({
+                    id_estudiante: asig.id_estudiante,
+                    nombres: asig.nombres || '',
+                    apellidos: asig.apellidos || '',
+                    dni: asig.dni || '',
+                    programa_estudios: asig.programa_estudios || '',
+                    id_docente: asig.id_docente,
+                    docente_responsable: asig.docente_responsable || detalle.docente_responsable || '',
+                    id_modulo: asig.id_modulo,
+                    numero_modulo: asig.numero_modulo,
+                    nombre_modulo: asig.nombre_modulo || detalle.nombre_modulo || '',
+                    fecha_inicio: asig.fecha_inicio || '',
+                    anio: asig.anio || detalle.anio,
+                    _alcanceKey: alcance,
+                });
+            });
+
+            const actualizadas = base.map((emp) => {
+                const empKey = idEmpDe(emp);
+                const actuales = Array.isArray(emp.estudiantes) ? emp.estudiantes : [];
+
+                // Conserva practicantes de otros alcances (otro docente/módulo/año) y reemplaza los del alcance actual
+                const sinAlcanceActual = actuales.filter(
+                    (est) => est?._alcanceKey !== alcance
+                );
+                const nuevosDeEstaEmpresa = porEmpresaMap.get(empKey) || [];
+
+                const combinadosMap = new Map();
+                sinAlcanceActual.forEach((est) => {
+                    const idK = idEstDe(est);
+                    if (idK) combinadosMap.set(idK, est);
+                });
+                nuevosDeEstaEmpresa.forEach((est) => {
+                    const idK = idEstDe(est);
+                    if (idK) {
+                        combinadosMap.set(idK, {
+                            ...(combinadosMap.get(idK) || {}),
+                            ...est,
+                        });
+                    }
+                });
+
+                return {
+                    ...emp,
+                    estudiantes: Array.from(combinadosMap.values()),
+                };
+            });
+
+            guardarCache(CACHE_EMPRESAS, actualizadas);
+            return actualizadas;
+        });
+
+        if (refrescarApi) {
+            cargarEmpresas(true);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         const guardadas = leerCache(CACHE_EMPRESAS);
@@ -326,13 +405,51 @@ export default function Empresas() {
             setCargando(false);
         }
         cargarEmpresas(Boolean(guardadas));
-    }, []);
+
+        try {
+            const snapRaw = sessionStorage.getItem(KEY_SNAPSHOT_EMPRESAS_REALTIME);
+            if (snapRaw) {
+                const snap = JSON.parse(snapRaw);
+                if (snap && Array.isArray(snap.asignaciones)) {
+                    aplicarAsignacionesEnTiempoReal(snap, false);
+                }
+            }
+        } catch {
+            /* ignorar */
+        }
+    }, [aplicarAsignacionesEnTiempoReal]);
+
+    useEffect(() => {
+        const onCustomEvent = (e) => {
+            aplicarAsignacionesEnTiempoReal(e?.detail, Boolean(e?.detail?.confirmadoServidor));
+        };
+
+        window.addEventListener('empresas:asignacion-tiempo-real', onCustomEvent);
+        window.addEventListener('expediente:actualizado', onCustomEvent);
+
+        let bc = null;
+        try {
+            if (typeof BroadcastChannel !== 'undefined') {
+                bc = new BroadcastChannel(CANAL_SYNC_EMPRESAS);
+                bc.onmessage = (msg) => {
+                    aplicarAsignacionesEnTiempoReal(msg?.data, Boolean(msg?.data?.confirmadoServidor));
+                };
+            }
+        } catch {
+            /* ignorar */
+        }
+
+        return () => {
+            window.removeEventListener('empresas:asignacion-tiempo-real', onCustomEvent);
+            window.removeEventListener('expediente:actualizado', onCustomEvent);
+            if (bc) bc.close();
+        };
+    }, [aplicarAsignacionesEnTiempoReal]);
 
     useEffect(() => {
         setPagina(1);
     }, [busqueda, filtro]);
 
-    // Esc cierra el panel abierto
     useEffect(() => {
         if (!mostrarForm && selId === null) return;
         const onKey = (e) => {
@@ -344,8 +461,7 @@ export default function Empresas() {
 
     const cargarEmpresas = async (hayCache = false) => {
         try {
-            const res = await axios.get(`${API_URL}/empresas`, {
-                headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' },
+            const res = await api.get('/empresas', {
                 timeout: 12000
             });
             const datos = Array.isArray(res.data) ? res.data : (res.data?.data || []);
@@ -402,8 +518,7 @@ export default function Empresas() {
 
         setBuscandoRuc(true);
         try {
-            const res = await axios.get(`${API_URL}/empresas/ruc/${ruc}`, {
-                headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' },
+            const res = await api.get(`/empresas/ruc/${ruc}`, {
                 timeout: 12000
             });
             const data = res.data?.data || res.data;
@@ -424,16 +539,24 @@ export default function Empresas() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            await axios.post(`${API_URL}/empresas`, formData, {
-                headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' },
+            const res = await api.post('/empresas', formData, {
                 timeout: 12000
             });
+            const creada = res?.data?.data || res?.data || null;
             sessionStorage.removeItem(CACHE_EMPRESAS);
+            invalidateApiCache('/empresas');
             mostrarAlerta('Empresa de convenio registrada exitosamente.', 'success');
             setFormData(formularioVacio);
-            cargarEmpresas(false);
+            setMostrarForm(false);
+            await cargarEmpresas(false);
+            window.dispatchEvent(new CustomEvent('empresas:actualizada', { detail: { empresa: creada } }));
         } catch (error) {
-            mostrarAlerta('Error al registrar la empresa. Verifique los datos.', 'error');
+            const errores = error.response?.data?.errors;
+            const primerError = errores ? Object.values(errores).flat()[0] : null;
+            mostrarAlerta(
+                primerError || error.response?.data?.message || 'No se pudo registrar la empresa.',
+                'error'
+            );
         }
     };
 
@@ -523,7 +646,6 @@ export default function Empresas() {
     ];
     const idxTab = Math.max(0, tabs.findIndex(t => t.id === filtro));
 
-    // Avisos: tarjeta neutra; el color solo está en el icono y en la barra de progreso
     const estilosAlerta = {
         success: { caja: 'bg-white text-slate-800 border-slate-200', icono: 'text-emerald-500', barra: 'bg-emerald-400', Ico: IconCheck },
         error: { caja: 'bg-white text-slate-800 border-slate-200', icono: 'text-rose-500', barra: 'bg-rose-400', Ico: IconAlert },
@@ -540,7 +662,6 @@ export default function Empresas() {
         <div className="w-full p-5 md:p-6 space-y-6">
             <style>{estilosAnimaciones}</style>
 
-            {/* Aviso flotante */}
             {alerta.mensaje && (
                 <div className={`em-toast-in fixed top-5 right-5 z-[70] w-[calc(100%-2.5rem)] max-w-sm relative overflow-hidden flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium border shadow-xl ${ea.caja}`} role="status">
                     <span className={ea.icono}><ea.Ico /></span>
@@ -556,14 +677,13 @@ export default function Empresas() {
                 </div>
             )}
 
-            {/* Cabecera: ruta, título grande y subtítulo (igual que Constancias) */}
             <div className="em-fade-up flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
                 <div>
                     <p className="text-xs text-slate-400">
-                        Gestión académica <span className="mx-1">/</span> <span className="font-medium text-slate-600">Empresas</span>
+                        Gestión académica <span className="mx-1">/</span> <span className="font-medium text-slate-600">Empresas asignadas</span>
                     </p>
-                    <h1 className="mt-1.5 text-3xl font-extrabold tracking-tight text-slate-900">Empresas de Convenio</h1>
-                    <p className="mt-1 text-sm text-slate-500">Instituciones aliadas y asignación de prácticas pre-profesionales EFSRT.</p>
+                    <h1 className="mt-1.5 text-3xl font-extrabold tracking-tight text-slate-900">Empresas asignadas</h1>
+                    <p className="mt-1 text-sm text-slate-500">Empresas con practicantes y docentes encargados sincronizados en tiempo real.</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <button
@@ -584,7 +704,6 @@ export default function Empresas() {
                 </div>
             </div>
 
-            {/* Estadísticas: una sola franja unida por líneas finas */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 shadow-sm">
                 <TarjetaResumen
                     titulo="Empresas aliadas" valor={totalEmpresas}
@@ -619,15 +738,12 @@ export default function Empresas() {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
-                {/* Directorio de empresas */}
                 <div className="em-fade-up bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" style={{ animationDelay: '300ms' }}>
-                    {/* Título */}
                     <div className="px-6 py-5 border-b border-slate-200">
-                        <h2 className="text-base font-bold text-slate-900">Directorio de empresas</h2>
-                        <p className="text-xs text-slate-500">Haz clic en una fila para ver su ficha completa.</p>
+                        <h2 className="text-base font-bold text-slate-900">Empresas asignadas</h2>
+                        <p className="text-xs text-slate-500">Haz clic en una fila para ver su ficha completa y practicantes asignados.</p>
                     </div>
 
-                    {/* Filtros y búsqueda en su propia fila */}
                     <div className="px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60">
                         <div className="relative inline-grid grid-cols-3 p-1 bg-slate-100 rounded-xl self-start">
                             <span
@@ -737,7 +853,7 @@ export default function Empresas() {
                                                 </td>
                                                 <td className="py-4 px-4">
                                                     {est.length > 0 ? (
-                                                        <div className="flex items-center gap-2.5" title={est.map(e => `${e.nombres} ${e.apellidos}`).join(', ')}>
+                                                        <div className="flex items-center gap-2.5" title={est.map(e => `${e.nombres || e.nombre || ''} ${e.apellidos || ''}`.trim()).join(', ')}>
                                                             <div className="flex -space-x-2">
                                                                 {est.slice(0, 3).map((e, idx) => (
                                                                     <span key={idx} className="w-7 h-7 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white">{inicialesPersona(e)}</span>
@@ -811,7 +927,6 @@ export default function Empresas() {
                     </div>
                 </div>
 
-                {/* Panel lateral informativo: una sola tarjeta con tres secciones */}
                 <aside className="em-fade-up bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100" style={{ animationDelay: '360ms' }}>
                     <section className="p-6 space-y-5">
                         <div className="space-y-1">
@@ -877,7 +992,6 @@ export default function Empresas() {
                 </aside>
             </div>
 
-            {/* Panel: ficha de la empresa */}
             {selEmp && (
                 <PanelLateral
                     onCerrar={() => setSelId(null)}
@@ -903,7 +1017,6 @@ export default function Empresas() {
                     }
                 >
                     <div className="space-y-7">
-                        {/* Resumen en una sola franja */}
                         <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200">
                             {[
                                 ['Practicantes', nEst(selEmp)],
@@ -917,7 +1030,6 @@ export default function Empresas() {
                             ))}
                         </div>
 
-                        {/* Contacto: lista con líneas finas, sin cajas */}
                         <section className="space-y-3">
                             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Contacto</h3>
                             <div className="divide-y divide-slate-100">
@@ -961,9 +1073,18 @@ export default function Empresas() {
                             ) : (
                                 <ul className="divide-y divide-slate-100">
                                     {selEmp.estudiantes.map((e, idx) => (
-                                        <li key={idx} className="em-row-in flex items-center gap-3 py-2.5" style={{ animationDelay: `${idx * 50}ms` }}>
-                                            <span className="w-8 h-8 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-bold">{inicialesPersona(e)}</span>
-                                            <span className="text-sm font-medium text-slate-800">{e.nombres} {e.apellidos}</span>
+                                        <li key={idx} className="em-row-in flex items-center justify-between gap-3 py-2.5" style={{ animationDelay: `${idx * 50}ms` }}>
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <span className="w-8 h-8 shrink-0 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-bold">{inicialesPersona(e)}</span>
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-medium text-slate-800 truncate">{`${e.nombres || e.nombre || ''} ${e.apellidos || ''}`.trim()}</p>
+                                                    {(e.nombre_modulo || e.docente_responsable) && (
+                                                        <p className="text-[11px] text-slate-400 truncate">
+                                                            {[e.nombre_modulo, e.docente_responsable ? `Asesor: ${e.docente_responsable}` : ''].filter(Boolean).join(' · ')}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </li>
                                     ))}
                                 </ul>
@@ -973,7 +1094,6 @@ export default function Empresas() {
                 </PanelLateral>
             )}
 
-            {/* Panel: registrar nueva empresa (sin cambios) */}
             {mostrarForm && (
                 <PanelLateral
                     onCerrar={() => setMostrarForm(false)}

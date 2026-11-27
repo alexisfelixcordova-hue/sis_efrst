@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import api from '../../api/axios.js';
 
-const API_URL = 'http://localhost:8000/api';
 const DOMINIO = 'worldnic.edu.pe';
 
 /* ---------- Iconos ---------- */
@@ -314,8 +313,8 @@ export default function AgregarUsuario({ onVolver }) {
                 Object.entries(formData).forEach(([k, v]) => cuerpo.append(k, v));
                 cuerpo.append('foto', foto);
             }
-            await axios.post(`${API_URL}/usuarios`, cuerpo, {
-                headers: { 'Authorization': `Bearer ${tokenSesion}`, 'Accept': 'application/json' }
+            await api.post('/usuarios', cuerpo, {
+                headers: { Accept: 'application/json' }
             });
             setRegistrado(true);
             mostrarAlerta('El usuario se registró correctamente.', 'success');

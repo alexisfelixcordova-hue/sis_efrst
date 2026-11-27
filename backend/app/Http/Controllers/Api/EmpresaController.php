@@ -11,7 +11,29 @@ class EmpresaController extends Controller
     public function index()
     {
         try {
-            $empresas = Empresa::with('estudiantes')->orderBy('id_empresa', 'desc')->get();
+            $empresas = Empresa::query()
+                ->select([
+                    'id_empresa',
+                    'ruc',
+                    'razon_social',
+                    'supervisor_empresa_nombre',
+                    'supervisor_empresa_cargo',
+                    'estado_convenio',
+                    'documento_convenio_ruta',
+                    'estado',
+                    'condicion',
+                    'tipo_contribuyente',
+                    'departamento',
+                    'provincia',
+                    'distrito',
+                    'ubigeo',
+                    'telefono',
+                    'correo_electronico',
+                    'direccion',
+                ])
+                ->with(['estudiantes:id_estudiante,nombres,apellidos,dni'])
+                ->orderByDesc('id_empresa')
+                ->get();
             return response()->json($empresas, 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -24,17 +46,24 @@ class EmpresaController extends Controller
 
     public function store(Request $request)
     {
-        $request->validate([
-            'ruc' => 'required|string|size:11|unique:empresas_convenio,ruc',
-            'razon_social' => 'required|string|max:255',
-            'supervisor_empresa_nombre' => 'nullable|string|max:255',
+        $datos = $request->validate([
+            'ruc' => 'required|string|size:11|regex:/^[0-9]{11}$/|unique:empresas_convenio,ruc',
+            'razon_social' => 'required|string|max:150',
+            'supervisor_empresa_nombre' => 'nullable|string|max:150',
             'supervisor_empresa_cargo' => 'nullable|string|max:100',
             'telefono' => 'nullable|string|max:50',
             'correo_electronico' => 'nullable|email|max:255',
             'direccion' => 'nullable|string|max:500',
+            'estado' => 'nullable|string|max:30',
+            'condicion' => 'nullable|string|max:30',
+            'tipo_contribuyente' => 'nullable|string|max:100',
+            'departamento' => 'nullable|string|max:100',
+            'provincia' => 'nullable|string|max:100',
+            'distrito' => 'nullable|string|max:100',
+            'ubigeo' => 'nullable|string|max:6',
         ]);
 
-        $empresa = Empresa::create($request->all());
+        $empresa = Empresa::create($datos);
 
         return response()->json([
             'message' => 'Empresa de convenio registrada exitosamente',

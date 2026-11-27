@@ -11,6 +11,13 @@ class ReporteController extends Controller
 {
     public function estadisticas(Request $request)
     {
+        if ((int) ($request->user()?->id_rol ?? 0) !== 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Las estadísticas institucionales son exclusivas del Administrador.',
+            ], 403);
+        }
+
         $anio = (int) ($request->input('anio') ?: now()->year);
 
         // Priorizamos expediente_efsrt o asignacion_asesores según exista en PostgreSQL

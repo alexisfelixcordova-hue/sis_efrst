@@ -38,6 +38,7 @@ class User extends Authenticatable
     {
         return [
             'contrasena_hash' => 'hashed',
+            'preferencias_notificaciones' => 'array',
         ];
     }
 

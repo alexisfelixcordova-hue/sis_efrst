@@ -37,11 +37,11 @@ const CAMPOS = [
 
 const tarjeta = "bg-white border border-[#e5e9f0]";
 const campo =
-  "w-full h-[27px] pl-[9px] pr-[28px] border border-[#e4e8ef] rounded-[9px] bg-white font-medium text-[8.5px] text-slate-900 outline-none appearance-none truncate focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 read-only:cursor-default";
+  "h-10 w-full truncate rounded-[9px] border border-[#e4e8ef] bg-white pl-3 pr-9 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 read-only:cursor-default";
 
 function Fila({ l, v, link }) {
   return (
-    <div className="flex items-center justify-between h-[22px] px-[12px] text-[7px]">
+    <div className="flex min-h-9 items-center justify-between gap-3 px-3 py-2 text-xs">
       <span className={link ? "text-blue-500" : "text-slate-500"}>{l}</span>
       <b className="font-semibold text-slate-900">{v}</b>
     </div>
@@ -307,7 +307,7 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
   const srcAvatar = !sinFoto ? resolverUrlFoto(fotoPerfil) || perfilDefault : "";
 
   return (
-    <div className="[zoom:1.5] font-['Plus_Jakarta_Sans',Inter,system-ui,sans-serif] text-[7.5px] text-slate-800 bg-[#f8f9fc] min-h-full px-[14px] pt-[6px] pb-[20px]">
+    <div className="min-h-full w-full min-w-0 overflow-x-hidden bg-[#f8f9fc] px-3 pb-5 pt-2 font-['Plus_Jakarta_Sans',Inter,system-ui,sans-serif] text-xs text-slate-800 sm:px-[14px] sm:pt-[6px]">
       <input
         ref={inputFotoRef}
         type="file"
@@ -317,13 +317,13 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
       />
 
       {/* barra superior */}
-      <div className="flex items-center justify-between h-[20px] mb-[16px]">
-        <div className="flex items-center gap-[10px] text-[7.5px] text-slate-500">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-[16px]">
+      <div className="flex items-center gap-2 text-xs text-slate-500">
           Mi Perfil Institucional <b className="font-bold text-slate-800">ACTIVO</b>
         </div>
         {estado && <span className="ml-auto mr-[10px] text-[7.5px] text-slate-600">{estado}</span>}
-        <button type="button" onClick={guardar} className="flex items-center gap-[6px] h-[20px] px-[12px] bg-white border border-[#e5e9f0] rounded-[8px] text-[7.5px] font-semibold shadow-sm cursor-pointer">
-          <Save size={9} /> Guardar Cambios
+        <button type="button" onClick={guardar} className="flex min-h-9 items-center gap-2 rounded-lg border border-[#e5e9f0] bg-white px-3 text-xs font-semibold shadow-sm">
+          <Save size={14} /> Guardar Cambios
         </button>
       </div>
 
@@ -333,13 +333,13 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
           <button
             type="button"
             onClick={() => inputFotoRef.current?.click()}
-            className="absolute top-[8px] right-[12px] flex items-center gap-[4px] px-[7px] py-[3px] rounded-[6px] bg-white/60 text-[7px] font-semibold text-slate-400 hover:text-slate-700 cursor-pointer"
+            className="absolute right-3 top-2 flex min-h-8 items-center gap-1 rounded-md bg-white/80 px-2 text-[11px] font-semibold text-slate-600 hover:text-slate-900"
           >
-            <ImageIcon size={8} /> Cambiar Portada
+            <ImageIcon size={13} /> Cambiar Portada
           </button>
         </div>
 
-        <div className="flex items-start px-[18px]">
+        <div className="flex flex-wrap items-start gap-y-2 px-3 sm:px-[18px]">
           <div
             onClick={() => inputFotoRef.current?.click()}
             title="Haz clic para cambiar tu foto de perfil"
@@ -358,38 +358,38 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
             <i className="absolute -right-[3px] -bottom-[3px] w-[10px] h-[10px] rounded-full bg-emerald-500 border-2 border-white" />
           </div>
 
-          <div className="ml-[15px] pt-[8px]">
-            <div className="flex items-center gap-[14px] h-[16px]">
-              <span className="text-[8px] font-semibold text-slate-800">{datos.nombres} {datos.apellidos}</span>
-              <span className="flex items-center gap-[4px] text-[7.2px] text-slate-700"><BadgeCheck size={9} /> {datos.cargo}</span>
-              <span className="text-[7.2px] text-slate-700">ID: #{idUsuarioActual ? `ADM-2026-${idUsuarioActual}` : "ADM-2026-001"}</span>
+          <div className="min-w-0 flex-1 pl-3 pt-2 sm:ml-[15px] sm:pl-0">
+            <div className="flex flex-wrap items-center gap-x-[14px] gap-y-1">
+              <span className="text-sm font-semibold text-slate-800">{datos.nombres} {datos.apellidos}</span>
+              <span className="flex items-center gap-1 text-xs text-slate-700"><BadgeCheck size={14} /> {datos.cargo}</span>
+              <span className="text-xs text-slate-700">ID: #{idUsuarioActual ? `ADM-2026-${idUsuarioActual}` : "ADM-2026-001"}</span>
             </div>
-            <div className="flex items-center gap-[14px] h-[16px]">
-              <span className="flex items-center gap-[4px] text-[7.2px] text-slate-700"><GraduationCap size={9} /> IESTP "Andrés Avelino Cáceres Dorregaray"</span>
-              <span className="flex items-center gap-[4px] text-[7.2px] text-slate-700"><Mail size={9} /> {datos.correo}</span>
+            <div className="flex flex-wrap items-center gap-x-[14px] gap-y-1">
+              <span className="flex min-w-0 items-center gap-1 text-xs text-slate-700"><GraduationCap size={14} /> IESTP "Andrés Avelino Cáceres Dorregaray"</span>
+              <span className="flex min-w-0 items-center gap-1 text-xs text-slate-700"><Mail size={14} /> {datos.correo}</span>
             </div>
           </div>
 
-          <div className="ml-auto mt-[17px] flex gap-[28px]">
+          <div className="ml-auto mt-2 flex flex-wrap gap-3 sm:mt-[17px] sm:gap-5">
             <button
               type="button"
               disabled={subiendoFoto}
               onClick={() => inputFotoRef.current?.click()}
-              className="flex items-center gap-[6px] text-[7.2px] text-slate-700 hover:text-blue-600 cursor-pointer disabled:opacity-60"
+              className="flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-60"
             >
-              <Camera size={9} /> {subiendoFoto ? "Subiendo..." : "Actualizar Foto"}
+              <Camera size={14} /> {subiendoFoto ? "Subiendo..." : "Actualizar Foto"}
             </button>
-            <button type="button" className="flex items-center gap-[6px] text-[7.2px] text-slate-700 cursor-pointer"><Contact size={9} /> Credencial Digital</button>
+            <button type="button" className="flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-slate-700"><Contact size={14} /> Credencial Digital</button>
           </div>
         </div>
 
-        <nav className="flex gap-[16px] px-[16px] mt-[12px]">
+        <nav className="mt-3 flex max-w-full gap-2 overflow-x-auto px-3 sm:gap-4 sm:px-4">
           {TABS.map(({ id, label, icon: Icon, badge }) => (
             <button
               key={id}
               type="button"
               onClick={() => setTab(id)}
-              className={`flex items-center gap-[6px] h-[28px] px-[2px] text-[7.5px] border-b-2 cursor-pointer ${
+              className={`flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2 text-xs ${
                 tab === id ? "text-slate-900 font-semibold border-blue-600" : "text-slate-600 border-transparent"
               }`}
             >
@@ -402,52 +402,52 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
       {/* cuerpo */}
       <div className="mt-[14px]">
         {tab === "info" ? (
-          <div className="flex items-start gap-[15px]">
-            <aside className={`${tarjeta} shrink-0 w-[203px] rounded-[12px] pb-[10px]`}>
-              <div className="flex items-center gap-[8px] pt-[17px] px-[21px] pb-[10px]">
-                <Contact size={12} />
-                <div className="leading-[10px]">
-                  <p className="text-[6.8px] text-slate-700">Rol Institucional</p>
-                  <span className="text-[6.8px] font-semibold text-slate-900">{datos.cargo}</span>
+          <div className="flex min-w-0 flex-col items-stretch gap-3 lg:flex-row lg:items-start lg:gap-[15px]">
+            <aside className={`${tarjeta} w-full rounded-xl pb-3 lg:w-[260px] lg:shrink-0`}>
+              <div className="flex items-center gap-2 px-4 pb-3 pt-4">
+                <Contact size={16} />
+                <div className="leading-snug">
+                  <p className="text-xs text-slate-700">Rol Institucional</p>
+                  <span className="text-sm font-semibold text-slate-900">{datos.cargo}</span>
                 </div>
-                <strong className="ml-auto text-[7.5px] font-bold text-slate-900">Activo</strong>
+                <strong className="ml-auto text-xs font-bold text-slate-900">Activo</strong>
               </div>
               <Fila l="Rol Principal" v={datos.cargo} />
               <Fila l="Nivel" v="Sistema EFSRT" link />
               <Fila l="Área Académica" v="Diseño y Programación Web" />
               <Fila l="Fecha de Afiliación" v="2026" />
-              <div className="flex items-center gap-[6px] h-[34px] mx-[12px] mt-[6px] pt-[10px] border-t border-[#eef1f6] text-[7px] font-semibold">
-                <ShieldCheck size={11} /> Estado de Verificación <b className="ml-auto font-bold text-green-600">Auditado</b>
+              <div className="mx-3 mt-2 flex min-h-10 items-center gap-2 border-t border-[#eef1f6] pt-2 text-xs font-semibold">
+                <ShieldCheck size={15} /> Estado de Verificación <b className="ml-auto font-bold text-green-600">Auditado</b>
               </div>
             </aside>
 
-            <section className={`${tarjeta} flex-1 min-w-0 mt-[0px] rounded-[12px] pt-[6px] px-[16px] pb-[18px]`}>
-              <div className="flex items-center justify-between min-h-[44px] pl-[8px]">
-                <div className="flex items-center gap-[6px]">
-                  <UserCog size={16} />
-                  <div className="max-w-[150px]">
-                    <strong className="block text-[7.5px] font-semibold text-slate-900">Información Personal y Académica</strong>
-                    <p className="mt-[1px] text-[6.8px] leading-[10px] text-slate-500">Actualiza los datos del expediente docente y directivo oficial</p>
+            <section className={`${tarjeta} min-w-0 flex-1 rounded-xl px-4 pb-5 pt-3 sm:px-5`}>
+              <div className="flex min-h-12 flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <UserCog size={20} />
+                  <div className="max-w-xs">
+                    <strong className="block text-sm font-semibold text-slate-900">Información Personal y Académica</strong>
+                    <p className="mt-1 text-xs leading-snug text-slate-500">Actualiza los datos del expediente docente y directivo oficial</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-[22px]">
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setEditando(!editando)}
-                    className={`flex items-center gap-[6px] w-[54px] text-left text-[6.8px] leading-[10px] cursor-pointer ${editando ? "text-blue-600" : "text-slate-500"}`}
+                    className={`flex min-h-9 items-center gap-1.5 text-left text-xs ${editando ? "text-blue-600" : "text-slate-500"}`}
                   >
-                    <Pencil size={9} /> <span>Editar Datos</span>
+                    <Pencil size={14} /> <span>Editar Datos</span>
                   </button>
-                  <div className="text-[6.8px] leading-[10px] font-bold text-slate-900">
+                  <div className="text-xs font-bold text-slate-900">
                     SISTEMA<span className="block text-blue-600">Conectado</span>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-x-[12px] gap-y-[10px] mt-[21px]">
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                 {CAMPOS.map(({ k, label, icon: Icon, select }) => (
                   <div key={k}>
-                    <label htmlFor={`pf-${k}`} className="block h-[10px] leading-[10px] mb-[5px] text-[6.8px] font-semibold text-slate-700">{label}</label>
+                    <label htmlFor={`pf-${k}`} className="mb-1.5 block text-xs font-semibold text-slate-700">{label}</label>
                     <div className="relative">
                       {select ? (
                         <select id={`pf-${k}`} value={datos[k]} onChange={cambiar(k)} disabled={!editando} className={campo}>
@@ -456,7 +456,7 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
                       ) : (
                         <input id={`pf-${k}`} value={datos[k]} onChange={cambiar(k)} readOnly={!editando} className={campo} />
                       )}
-                      <Icon size={10} className="absolute right-[8px] top-[9px] pointer-events-none text-slate-600" />
+                      <Icon size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-600" />
                     </div>
                   </div>
                 ))}
@@ -464,7 +464,7 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
             </section>
           </div>
         ) : (
-          <div className="[zoom:0.6667]">
+          <div className="min-w-0 space-y-4">
             {tab === "seg" && <SeguridadAcceso />}
             {tab === "roles" && <RolesPermiso usuario={{ rol: datos.cargo, nivel: "Sistema EFSRT" }} />}
             {tab === "notif" && <Notificaciones />}

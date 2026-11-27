@@ -48,6 +48,43 @@ const normalizarDatosAsignacion = (est) => {
     est.asesor ||
     est.docente_asesor ||
     "";
+  const idModulo =
+    est.id_modulo ??
+    estObj.id_modulo ??
+    expObj.id_modulo ??
+    asigObj.id_modulo ??
+    est.modulo_id ??
+    null;
+  const nombreModulo =
+    est.modulo_nombre ||
+    est.nombre_modulo ||
+    est.modulo ||
+    estObj.modulo_nombre ||
+    expObj.nombre_modulo ||
+    asigObj.modulo_nombre ||
+    "";
+  const modulosExistentes =
+    est.modulos || estObj.modulos || expObj.modulos || asigObj.modulos;
+  const modulos =
+    Array.isArray(modulosExistentes) && modulosExistentes.length
+      ? modulosExistentes
+      : idModulo !== null && nombreModulo
+        ? [
+            {
+              id_modulo: idModulo,
+              numero_modulo:
+                est.numero_modulo ?? expObj.numero_modulo ?? idModulo,
+              nombre_modulo: nombreModulo,
+              id_expediente: est.id_expediente ?? expObj.id_expediente ?? null,
+              docente_asignado: asesorReal || "Docente no asignado",
+              empresa: empresaReal || "Empresa no registrada",
+              horas_acumuladas: est.horas_acumuladas ?? 0,
+              horas_requeridas: est.horas_requeridas ?? 160,
+              nota: est.nota ?? null,
+              adjuntado: Boolean(est.adjuntado_expediente || est.calificado),
+            },
+          ]
+        : [];
 
   return {
     ...estObj,
@@ -56,7 +93,8 @@ const normalizarDatosAsignacion = (est) => {
     ...est,
     id: obtenerIdEstudiante(est),
     id_estudiante: est.id_estudiante ?? estObj.id_estudiante ?? est.id ?? null,
-    id_modulo: est.id_modulo ?? expObj.id_modulo ?? asigObj.id_modulo ?? est.modulo_id ?? null,
+    id_modulo: idModulo,
+    modulos,
     empresa: empresaReal,
     ubicacion: ubicacionReal,
     asesor: asesorReal,
@@ -158,6 +196,27 @@ export function CalificarEstudiante({
     );
   }
 
+  if (!Array.isArray(seleccionado.modulos) || seleccionado.modulos.length === 0) {
+    return (
+      <div className={`mx-auto max-w-xl rounded-2xl border p-6 text-center ${darkMode ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-200 bg-white text-slate-800"}`}>
+        <h2 className="text-lg font-semibold">No hay un módulo asignado</h2>
+        <p className="mt-2 text-sm text-slate-500">
+          Este estudiante no tiene un módulo asociado a tu asignación. No se puede registrar una calificación sin ese vínculo.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setSeleccionadoId(null);
+            setEstudianteActivoDirecto(null);
+          }}
+          className="mt-5 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          Volver a mis alumnos
+        </button>
+      </div>
+    );
+  }
+
   return (
     <DetalleRevisionEstudiante
       estudiante={seleccionado}
@@ -170,7 +229,6 @@ export function CalificarEstudiante({
         setAvisoGlobal({ tipo: "ok", mensaje: msg });
         window.dispatchEvent(new CustomEvent("expediente:actualizado"));
       }}
-      setVista={setVista}
       usuario={usuario}
       darkMode={darkMode}
     />

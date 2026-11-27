@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -58,8 +59,7 @@ class AsistenteController extends Controller
 
     public function chat(Request $request)
     {
-        // Más tiempo para PHP que el timeout de la llamada a Gemini
-        set_time_limit(90);
+        set_time_limit(20);
 
         $request->validate([
             'mensaje'   => 'required|string|max:1000',
@@ -86,8 +86,8 @@ class AsistenteController extends Controller
 
         try {
             $respuesta = Http::withHeaders(['x-goog-api-key' => env('GEMINI_API_KEY')])
-                ->timeout(20)
-                ->retry(2, 1500, throw: false)
+                ->connectTimeout(4)
+                ->timeout(14)
                 ->post("https://generativelanguage.googleapis.com/v1beta/models/{$modelo}:generateContent", [
                     'systemInstruction' => ['parts' => [['text' => $this->instrucciones()]]],
                     'contents' => $contenido,
@@ -227,11 +227,11 @@ class AsistenteController extends Controller
     {
         return
             'Eres el asistente virtual del sistema EFSRT del IESTP Andrés Avelino Cáceres Dorregaray. ' .
-            'Ayudas a docentes y coordinadores a usar el sistema (estudiantes, empresas, expedientes, constancias, perfil, contraseña). ' .
+            'Ayudas a estudiantes, docentes y coordinadores a usar el sistema (prácticas, estudiantes, empresas, expedientes, constancias, perfil, contraseña). ' .
             'Responde en español, de forma breve y clara. Si no sabes algo, dilo. ' .
             'Nunca pidas contraseñas ni inventes datos. ' .
             'Cuando te pregunten por cantidades, usa SOLO los datos de abajo y no inventes cifras. ' .
-            "\n\n" . $this->datosDelSistema() . "\n\n" .
+            "\n\n" . Cache::remember('asistente_datos_sistema', now()->addSeconds(30), fn () => $this->datosDelSistema()) . "\n\n" .
             'Si te preguntan por un dato que no está en esa lista (por ejemplo nombres o datos personales de una persona), ' .
             'explica que solo tienes acceso a cantidades generales y que, para ver listas, pueden pedir por ejemplo "lista de estudiantes" o "lista de empresas".';
     }

@@ -19,27 +19,36 @@ import {
   CheckSquare,
   Square,
   RefreshCcw,
+  Layers,
+  Award,
+  Sparkles,
 } from "lucide-react";
 
 import {
   tema,
   foco,
   Cabecera,
-  iniciales,
 } from "../Docente/componentes/DocenteComun.jsx";
 import api from "../../../api/axios.js";
+import AvatarEstudiante from "../../AvatarEstudiante.jsx";
 
 const TIPOS = [
-  "Bitácora semanal",
-  "Informe parcial",
-  "Informe final",
+  {
+    id: "Bitácora semanal",
+    corto: "Bitácora",
+    ayuda: "Registro semanal de las actividades realizadas en prácticas.",
+  },
+  {
+    id: "Informe parcial",
+    corto: "Parcial",
+    ayuda: "Avance técnico y entregables a mitad del módulo EFSRT.",
+  },
+  {
+    id: "Informe final",
+    corto: "Final",
+    ayuda: "Cierre integral del módulo, horas y resultados obtenidos.",
+  },
 ];
-
-const AYUDA_TIPO = {
-  "Bitácora semanal": "Registro semanal de las actividades realizadas.",
-  "Informe parcial": "Avance del trabajo a mitad de la práctica.",
-  "Informe final": "Cierre de la práctica y resultados obtenidos.",
-};
 
 const ESTADOS_REVISION = ["Por revisar", "Observada", "Conforme"];
 
@@ -80,8 +89,7 @@ const obtenerClaveSesion = () => {
 
 const leerStorage = (clave, inicial) => {
   try {
-    const datos =
-      sessionStorage.getItem(clave) ?? localStorage.getItem(clave);
+    const datos = sessionStorage.getItem(clave) ?? localStorage.getItem(clave);
     return datos ? JSON.parse(datos) : inicial;
   } catch {
     return inicial;
@@ -108,7 +116,21 @@ const extraerLista = (payload) => {
   return [];
 };
 
-const normalizarAlumno = (item = {}, idx = 0) => {
+const limpiarModulo = (txt = "") =>
+  String(txt || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\bpalicaciones\b/gi, "Aplicaciones")
+    .replace(/\bmoviles\b/gi, "Móviles")
+    .replace(/\bintegracion\b/gi, "Integración");
+
+const canonModulo = (txt = "") =>
+  limpiarModulo(txt)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const normalizarRegistro = (item = {}, idx = 0) => {
   const est = item.estudiante || item.alumno || item;
   const nombres = est.nombres || item.nombres || "";
   const apellidos = est.apellidos || item.apellidos || "";
@@ -125,12 +147,27 @@ const normalizarAlumno = (item = {}, idx = 0) => {
     null;
   const dni = String(est.dni || item.dni || "").trim();
 
+  const moduloNombre =
+    limpiarModulo(
+      item.modulo_nombre ||
+        item.nombre_modulo ||
+        item.modulo?.nombre ||
+        item.modulo?.nombre_modulo ||
+        item.modulo ||
+        "Módulo EFSRT"
+    ) || "Módulo EFSRT";
+
+  const idModulo =
+    item.id_modulo ?? item.modulo_id ?? item.modulo?.id_modulo ?? item.modulo?.id ?? null;
+
   return {
     ...est,
     ...item,
     id: idEst,
     id_estudiante: idEst,
     id_expediente: idExp,
+    id_modulo: idModulo,
+    modulo_nombre: moduloNombre,
     dni,
     nombre: nombreCompleto,
     entidad:
@@ -139,22 +176,24 @@ const normalizarAlumno = (item = {}, idx = 0) => {
       item.empresa?.razon_social ||
       est.entidad_nombre ||
       est.entidad ||
-      item.modulo_nombre ||
-      "Módulo EFSRT",
+      moduloNombre,
     proyecto:
       item.proyecto_titulo ||
       item.proyecto ||
       est.proyecto_titulo ||
       est.proyecto ||
-      item.modulo_nombre ||
+      moduloNombre ||
       item.programa_estudios ||
       "Prácticas EFSRT",
     estado: item.estado || est.estado || "En progreso",
   };
 };
 
-const claveAlumno = (a) =>
-  String(a?.id_estudiante ?? a?.id ?? a?.dni ?? "");
+const claveAlumno = (a) => {
+  const dni = String(a?.dni || "").trim();
+  if (dni && dni !== "S/N" && !dni.startsWith("SIN-DNI")) return `dni:${dni}`;
+  return `id:${String(a?.id_estudiante ?? a?.id ?? "")}`;
+};
 
 const esImagen = (nombre = "", tipoMime = "") => {
   if (String(tipoMime).startsWith("image/")) return true;
@@ -195,7 +234,8 @@ export default function EvaluacionEvidencias({
     return leerStorage(storageAlumnosKey, null);
   }, [claveSesion, storageAlumnosKey]);
 
-  const [alumnos, setAlumnos] = useState(() => cacheInicialAlumnos ?? []);
+  const [registros, setRegistros] = useState(() => cacheInicialAlumnos ?? []);
+  const [modulosCatalogo, setModulosCatalogo] = useState([]);
   const [cargandoAlumnos, setCargandoAlumnos] = useState(() => !cacheInicialAlumnos);
   const [errorAlumnos, setErrorAlumnos] = useState("");
   const [cargandoEvidenciasBD, setCargandoEvidenciasBD] = useState(false);
@@ -205,7 +245,8 @@ export default function EvaluacionEvidencias({
 
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState("Todos");
-  const [selA, setSelA] = useState(null);
+  const [selAlumnoKey, setSelAlumnoKey] = useState(null);
+  const [selModuloKey, setSelModuloKey] = useState("");
   const [tipoIdx, setTipoIdx] = useState(0);
   const [borradores, setBorradores] = useState({});
   const [aviso, setAviso] = useState(null);
@@ -217,24 +258,84 @@ export default function EvaluacionEvidencias({
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
+  const estudiantesUnicos = useMemo(() => {
+    const mapa = new Map();
+
+    registros.forEach((item, idx) => {
+      const reg = normalizarRegistro(item, idx);
+      const aKey = claveAlumno(reg);
+      const modKey = canonModulo(reg.modulo_nombre) || `mod-${idx}`;
+
+      const infoModulo = {
+        key: modKey,
+        id_modulo: reg.id_modulo,
+        id_expediente: reg.id_expediente,
+        nombre: reg.modulo_nombre,
+        entidad: reg.entidad,
+        proyecto: reg.proyecto,
+        raw: reg,
+      };
+
+      if (!mapa.has(aKey)) {
+        mapa.set(aKey, {
+          ...reg,
+          alumnoKey: aKey,
+          modulosMap: new Map([[modKey, infoModulo]]),
+        });
+      } else {
+        const actual = mapa.get(aKey);
+        if (!actual.modulosMap.has(modKey)) {
+          actual.modulosMap.set(modKey, infoModulo);
+        }
+      }
+    });
+
+    return Array.from(mapa.values()).map((est) => {
+      const modulosActuales = Array.from(est.modulosMap.values());
+      if (modulosActuales.length === 1 && modulosCatalogo.length > 0) {
+        modulosCatalogo.forEach((mc, mIdx) => {
+          const nom = limpiarModulo(mc.nombre || mc.nombre_modulo || "");
+          const mKey = canonModulo(nom);
+          if (nom && mKey && !est.modulosMap.has(mKey)) {
+            est.modulosMap.set(mKey, {
+              key: mKey,
+              id_modulo: mc.id_modulo ?? mc.id ?? mIdx + 1,
+              id_expediente: est.id_expediente,
+              nombre: nom,
+              entidad: est.entidad,
+              proyecto: nom,
+              raw: est,
+              esCatalogoExtra: true,
+            });
+          }
+        });
+      }
+      return {
+        ...est,
+        modulos: Array.from(est.modulosMap.values()),
+      };
+    });
+  }, [registros, modulosCatalogo]);
+
   const cargarEvidenciasAlumnoBD = useCallback(
     async (alumno) => {
       if (!alumno) return;
-      const ref = claveAlumno(alumno);
-      if (!ref) return;
+      const aKey = claveAlumno(alumno);
+      const refId = alumno.id_estudiante ?? alumno.id;
+      if (!refId) return;
 
       setCargandoEvidenciasBD(true);
       try {
         const params = {
-          id_estudiante: alumno.id_estudiante ?? alumno.id,
+          id_estudiante: refId,
           ...(alumno.id_expediente ? { id_expediente: alumno.id_expediente } : {}),
           ...(alumno.dni ? { dni: alumno.dni } : {}),
         };
 
         const endpoints = [
           "/evidencias-efsrt",
-          `/expediente-efsrt/${ref}/evidencias`,
-          `/alumnos/${ref}/evidencias-efsrt`,
+          `/expediente-efsrt/${refId}/evidencias`,
+          `/alumnos/${refId}/evidencias-efsrt`,
         ];
 
         let filasEv = [];
@@ -260,9 +361,14 @@ export default function EvaluacionEvidencias({
               ).toLowerCase();
 
               const tipoMatch =
-                TIPOS.find((tNom) => tipoRaw.includes(tNom.toLowerCase().split(" ")[0])) ||
-                TIPOS.find((tNom) => tipoRaw.includes(tNom.toLowerCase())) ||
+                TIPOS.find((tObj) => tipoRaw.includes(tObj.id.toLowerCase().split(" ")[0])) ||
+                TIPOS.find((tObj) => tipoRaw.includes(tObj.id.toLowerCase())) ||
                 TIPOS[0];
+
+              const modRowKey =
+                canonModulo(row.modulo_nombre || row.nombre_modulo || "") ||
+                alumno.modulos?.[0]?.key ||
+                "general";
 
               const estadoRev = normalizarEstadoRevision(
                 row.estado_revision ?? row.estado ?? (row.revisado ? "Conforme" : "Por revisar")
@@ -285,7 +391,10 @@ export default function EvaluacionEvidencias({
                           name: f.nombre_archivo || f.name || f.nombre || `evidencia_${idx + 1}`,
                           url: f.url || f.ruta || f.path || "",
                           size: Number(f.tamano || f.size || 0),
-                          esFoto: esImagen(f.nombre_archivo || f.name || f.url || "", f.mime_type || f.type),
+                          esFoto: esImagen(
+                            f.nombre_archivo || f.name || f.url || "",
+                            f.mime_type || f.type
+                          ),
                           seleccionada: f.seleccionada ?? f.revisada ?? true,
                           desdeBD: true,
                         }
@@ -310,7 +419,7 @@ export default function EvaluacionEvidencias({
                     ]
                   : [];
 
-              const claveItem = `${ref}|${tipoMatch}`;
+              const claveItem = `${aKey}|${modRowKey}|${tipoMatch.id}`;
               const existente = next[claveItem];
               const combinados = [
                 ...(existente?.archivosBD || []),
@@ -326,12 +435,15 @@ export default function EvaluacionEvidencias({
                 id_evidencia: row.id_evidencia ?? row.id ?? existente?.id_evidencia ?? null,
                 id_expediente:
                   row.id_expediente ?? alumno.id_expediente ?? existente?.id_expediente ?? null,
-                id_estudiante: alumno.id_estudiante ?? alumno.id,
+                id_estudiante: refId,
                 dni: alumno.dni,
-                tipo: tipoMatch,
+                modulo_key: modRowKey,
+                tipo: tipoMatch.id,
                 comentario: row.comentario ?? row.observacion ?? existente?.comentario ?? "",
+                calificacion:
+                  row.calificacion ?? row.nota ?? existente?.calificacion ?? "",
                 estado: estadoRev,
-                revisado: Boolean(row.revisado ?? (estadoRev === "Conforme")),
+                revisado: Boolean(row.revisado ?? estadoRev === "Conforme"),
                 fecha:
                   String(row.fecha_actualizacion || row.updated_at || row.fecha || "").slice(0, 10) ||
                   existente?.fecha ||
@@ -362,7 +474,7 @@ export default function EvaluacionEvidencias({
           : leerStorage(sKey, null);
 
       if (Array.isArray(cached) && !forzarSpinner) {
-        setAlumnos(cached);
+        setRegistros(cached);
         setCargandoAlumnos(false);
       } else if (forzarSpinner || !Array.isArray(cached)) {
         setCargandoAlumnos(true);
@@ -371,19 +483,24 @@ export default function EvaluacionEvidencias({
       setErrorAlumnos("");
 
       try {
-        const res = await api.get("/mis-alumnos", { headers: headersAuth() });
-        const lista = extraerLista(res.data).map(normalizarAlumno);
+        const [resAlumnos, resModulos] = await Promise.all([
+          api.get("/mis-alumnos", { headers: headersAuth() }),
+          api.get("/modulos-profesionales", { params: { per_page: 100 } }).catch(() => ({ data: [] })),
+        ]);
+        const lista = extraerLista(resAlumnos.data).map(normalizarRegistro);
+        const listaMods = extraerLista(resModulos.data);
         CACHE_ALUMNOS_MEM.clave = claveActual;
         CACHE_ALUMNOS_MEM.lista = lista;
-        setAlumnos(lista);
+        setRegistros(lista);
+        setModulosCatalogo(listaMods);
         guardarStorage(sKey, lista);
       } catch (err) {
         console.error("Error al cargar alumnos asignados:", err);
         const respaldo = leerStorage(sKey, null);
         if (Array.isArray(respaldo)) {
-          setAlumnos(respaldo);
+          setRegistros(respaldo);
         } else {
-          setAlumnos([]);
+          setRegistros([]);
           setErrorAlumnos("No se pudieron cargar tus alumnos asignados.");
         }
       } finally {
@@ -402,34 +519,10 @@ export default function EvaluacionEvidencias({
     guardarStorage(storageEvalsKey, evals);
   }, [evals, storageEvalsKey]);
 
-  useEffect(() => {
-    if (alumnos.length === 0) return;
+  const claveEv = (aKey, modKey, tipoId) => `${aKey}|${modKey || "general"}|${tipoId}`;
 
-    if (estudianteSeleccionado) {
-      const norm = normalizarAlumno(estudianteSeleccionado);
-      const ref = claveAlumno(norm);
-      const coincidente = alumnos.find((a) => claveAlumno(a) === ref);
-      if (coincidente) {
-        setFiltro("Todos");
-        setSelA(claveAlumno(coincidente));
-        setTipoIdx(0);
-        cargarEvidenciasAlumnoBD(coincidente);
-        return;
-      }
-    }
-
-    if (!selA) {
-      const primero = alumnos[0];
-      setSelA(claveAlumno(primero));
-      setTipoIdx(0);
-      cargarEvidenciasAlumnoBD(primero);
-    }
-  }, [estudianteSeleccionado, alumnos, selA, cargarEvidenciasAlumnoBD]);
-
-  const claveEv = (a, tipo) => `${claveAlumno(a)}|${tipo}`;
-
-  const registrada = (a, tipo) => {
-    const reg = evals[claveEv(a, tipo)];
+  const registrada = (aKey, modKey, tipoId) => {
+    const reg = evals[claveEv(aKey, modKey, tipoId)];
     return Boolean(
       reg &&
         ((reg.archivosBD && reg.archivosBD.length > 0) ||
@@ -439,42 +532,119 @@ export default function EvaluacionEvidencias({
     );
   };
 
-  const estadoEv = (a, tipo) => {
-    const reg = evals[claveEv(a, tipo)];
+  const estadoEv = (aKey, modKey, tipoId) => {
+    const reg = evals[claveEv(aKey, modKey, tipoId)];
     if (!reg) return "Sin registrar";
     return reg.estado || "Por revisar";
   };
 
-  const nRegistradas = (a) => TIPOS.filter((tipo) => registrada(a, tipo)).length;
-  const incompletos = alumnos.filter((a) => nRegistradas(a) < TIPOS.length).length;
+  const nRegistradasModulo = (aKey, modKey) =>
+    TIPOS.filter((tObj) => registrada(aKey, modKey, tObj.id)).length;
 
-  const visibles = alumnos.filter((a) => {
-    const n = nRegistradas(a);
+  const nRegistradasAlumno = (est) => {
+    const mods = est.modulos?.filter((m) => !m.esCatalogoExtra) || [];
+    const objetivoMods = mods.length ? mods : est.modulos?.slice(0, 1) || [];
+    return objetivoMods.reduce(
+      (acc, m) => acc + nRegistradasModulo(est.alumnoKey, m.key),
+      0
+    );
+  };
+
+  const maxEvidenciasAlumno = (est) => {
+    const mods = est.modulos?.filter((m) => !m.esCatalogoExtra) || [];
+    const countMods = mods.length ? mods.length : 1;
+    return countMods * TIPOS.length;
+  };
+
+  const incompletos = estudiantesUnicos.filter(
+    (est) => nRegistradasAlumno(est) < maxEvidenciasAlumno(est)
+  ).length;
+
+  const visibles = estudiantesUnicos.filter((est) => {
+    const n = nRegistradasAlumno(est);
+    const totalMax = maxEvidenciasAlumno(est);
     const coincideFiltro =
       filtro === "Todos" ||
-      (filtro === "Pendientes" && n < TIPOS.length) ||
-      (filtro === "Completos" && n === TIPOS.length);
+      (filtro === "Pendientes" && n < totalMax) ||
+      (filtro === "Completos" && n === totalMax);
 
-    const coincideBusqueda = `${a.nombre} ${a.dni} ${a.entidad} ${a.proyecto}`
+    const nombresMods = est.modulos.map((m) => m.nombre).join(" ");
+    const coincideBusqueda = `${est.nombre} ${est.dni} ${est.entidad} ${nombresMods}`
       .toLowerCase()
       .includes(q.toLowerCase());
 
     return coincideFiltro && coincideBusqueda;
   });
 
-  const alumnoActual = alumnos.find((a) => claveAlumno(a) === selA) || null;
-  const tipoActual = TIPOS[tipoIdx];
-  const clave = alumnoActual ? claveEv(alumnoActual, tipoActual) : null;
-  const guardada = clave ? evals[clave] : null;
+  useEffect(() => {
+    if (estudiantesUnicos.length === 0) return;
 
-  const bor = (clave && borradores[clave]) || {
+    if (estudianteSeleccionado) {
+      const norm = normalizarRegistro(estudianteSeleccionado);
+      const refKey = claveAlumno(norm);
+      const coincidente = estudiantesUnicos.find((est) => est.alumnoKey === refKey);
+      if (coincidente) {
+        setFiltro("Todos");
+        setSelAlumnoKey(coincidente.alumnoKey);
+        const modSugerido = canonModulo(norm.modulo_nombre);
+        const modExiste = coincidente.modulos.some((m) => m.key === modSugerido);
+        setSelModuloKey(modExiste ? modSugerido : coincidente.modulos[0]?.key || "");
+        setTipoIdx(0);
+        cargarEvidenciasAlumnoBD(coincidente);
+        return;
+      }
+    }
+
+    if (!selAlumnoKey) {
+      const primero = estudiantesUnicos[0];
+      setSelAlumnoKey(primero.alumnoKey);
+      setSelModuloKey(primero.modulos[0]?.key || "");
+      setTipoIdx(0);
+      cargarEvidenciasAlumnoBD(primero);
+    }
+  }, [estudianteSeleccionado, estudiantesUnicos, selAlumnoKey, cargarEvidenciasAlumnoBD]);
+
+  const alumnoActual =
+    estudiantesUnicos.find((est) => est.alumnoKey === selAlumnoKey) || null;
+
+  const moduloActual = useMemo(() => {
+    if (!alumnoActual?.modulos?.length) return null;
+    return (
+      alumnoActual.modulos.find((m) => m.key === selModuloKey) ||
+      alumnoActual.modulos[0]
+    );
+  }, [alumnoActual, selModuloKey]);
+
+  useEffect(() => {
+    if (moduloActual && moduloActual.key !== selModuloKey) {
+      setSelModuloKey(moduloActual.key);
+    }
+  }, [moduloActual, selModuloKey]);
+
+  const tipoActualObj = TIPOS[tipoIdx] || TIPOS[0];
+  const tipoActual = tipoActualObj.id;
+
+  const claveActual =
+    alumnoActual && moduloActual
+      ? claveEv(alumnoActual.alumnoKey, moduloActual.key, tipoActual)
+      : null;
+
+  const guardada = claveActual ? evals[claveActual] : null;
+
+  const bor = (claveActual && borradores[claveActual]) || {
     comentario: guardada?.comentario || "",
     estado: guardada?.estado || "Por revisar",
+    calificacion: guardada?.calificacion ?? "",
   };
-  const setBor = (cambio) =>
-    clave && setBorradores((prev) => ({ ...prev, [clave]: { ...bor, ...cambio } }));
 
-  const archivosNuevos = clave ? archivos[clave] || [] : [];
+  const setBor = (cambio) =>
+    claveActual &&
+    setBorradores((prev) => ({
+      ...prev,
+      [claveActual]: { ...bor, ...cambio },
+    }));
+
+  const archivosNuevos = claveActual ? archivos[claveActual] || [] : [];
   const archivosBDActuales = guardada?.archivosBD || [];
 
   const archivosSeleccionadosCount = useMemo(() => {
@@ -485,19 +655,29 @@ export default function EvaluacionEvidencias({
 
   const totalArchivosEvidencia = archivosBDActuales.length + archivosNuevos.length;
 
-  const sucio = !clave
+  const sucio = !claveActual
     ? false
     : guardada
       ? bor.comentario !== (guardada.comentario || "") ||
         bor.estado !== (guardada.estado || "Por revisar") ||
+        String(bor.calificacion ?? "") !== String(guardada.calificacion ?? "") ||
         archivosNuevos.length > 0
-      : archivosNuevos.length > 0 || bor.comentario.trim() !== "";
+      : archivosNuevos.length > 0 ||
+        bor.comentario.trim() !== "" ||
+        String(bor.calificacion ?? "").trim() !== "";
 
-  const elegirAlumno = (a) => {
-    setSelA(claveAlumno(a));
+  const elegirAlumno = (est) => {
+    setSelAlumnoKey(est.alumnoKey);
+    setSelModuloKey(est.modulos[0]?.key || "");
     setTipoIdx(0);
     setAviso(null);
-    cargarEvidenciasAlumnoBD(a);
+    cargarEvidenciasAlumnoBD(est);
+  };
+
+  const elegirModulo = (modKey) => {
+    setSelModuloKey(modKey);
+    setTipoIdx(0);
+    setAviso(null);
   };
 
   const elegirTipo = (i) => {
@@ -507,23 +687,14 @@ export default function EvaluacionEvidencias({
 
   const irAlExpedienteAlumno = (alumno) => {
     if (!alumno) return;
-    const ref = claveAlumno(alumno);
-    const evalsAlumno = TIPOS.reduce((acc, tipo) => {
-      const registro = evals[`${ref}|${tipo}`];
-      if (registro) acc[tipo] = registro;
-      return acc;
-    }, {});
-
     const payload = {
       ...alumno,
-      evaluaciones_evidencias: evalsAlumno,
+      modulo_nombre: moduloActual?.nombre || alumno.modulo_nombre,
+      id_modulo: moduloActual?.id_modulo ?? alumno.id_modulo,
     };
 
     try {
-      localStorage.setItem(
-        "expediente_alumno_seleccionado",
-        JSON.stringify(payload)
-      );
+      localStorage.setItem("expediente_alumno_seleccionado", JSON.stringify(payload));
     } catch {
       /* ignorar error de storage */
     }
@@ -533,7 +704,7 @@ export default function EvaluacionEvidencias({
   };
 
   const agregarArchivos = (nuevos) => {
-    if (!clave || nuevos.length === 0) return;
+    if (!claveActual || nuevos.length === 0) return;
 
     const permitidos = [
       "application/pdf",
@@ -579,7 +750,7 @@ export default function EvaluacionEvidencias({
 
       setArchivos((prev) => ({
         ...prev,
-        [clave]: [...(prev[clave] || []), ...mapeados],
+        [claveActual]: [...(prev[claveActual] || []), ...mapeados],
       }));
 
       if (validos.length === nuevos.length && dentroDelLimite.length === validos.length) {
@@ -600,20 +771,17 @@ export default function EvaluacionEvidencias({
   };
 
   const alternarSeleccionEvidencia = (esDeBD, indice) => {
-    if (!clave) return;
+    if (!claveActual) return;
     if (esDeBD) {
       setEvals((prev) => {
-        const reg = prev[clave];
+        const reg = prev[claveActual];
         if (!reg) return prev;
         const nextBD = (reg.archivosBD || []).map((item, idx) =>
           idx === indice ? { ...item, seleccionada: !(item.seleccionada !== false) } : item
         );
         const next = {
           ...prev,
-          [clave]: {
-            ...reg,
-            archivosBD: nextBD,
-          },
+          [claveActual]: { ...reg, archivosBD: nextBD },
         };
         guardarStorage(`ev_efsrt_evals_${obtenerClaveSesion()}`, next);
         return next;
@@ -621,7 +789,7 @@ export default function EvaluacionEvidencias({
     } else {
       setArchivos((prev) => ({
         ...prev,
-        [clave]: (prev[clave] || []).map((item, idx) =>
+        [claveActual]: (prev[claveActual] || []).map((item, idx) =>
           idx === indice ? { ...item, seleccionada: !(item.seleccionada !== false) } : item
         ),
       }));
@@ -629,14 +797,14 @@ export default function EvaluacionEvidencias({
   };
 
   const eliminarArchivoNuevo = (indice) => {
-    if (!clave) return;
+    if (!claveActual) return;
     setArchivos((prev) => {
-      const lista = prev[clave] || [];
+      const lista = prev[claveActual] || [];
       const target = lista[indice];
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
       return {
         ...prev,
-        [clave]: lista.filter((_, i) => i !== indice),
+        [claveActual]: lista.filter((_, i) => i !== indice),
       };
     });
   };
@@ -659,10 +827,23 @@ export default function EvaluacionEvidencias({
   };
 
   const guardar = async () => {
-    if (!alumnoActual || !clave) return;
+    if (!alumnoActual || !moduloActual || !claveActual) return;
 
-    if (totalArchivosEvidencia === 0 && !guardada) {
-      setAviso({ tipo: "error", texto: "Adjunta al menos una foto o archivo para registrar esta evidencia." });
+    const notaNum =
+      String(bor.calificacion ?? "").trim() !== ""
+        ? Number(bor.calificacion)
+        : null;
+
+    if (notaNum !== null && (Number.isNaN(notaNum) || notaNum < 0 || notaNum > 20)) {
+      setAviso({ tipo: "error", texto: "La calificación debe estar entre 0 y 20." });
+      return;
+    }
+
+    if (totalArchivosEvidencia === 0 && !guardada && notaNum === null) {
+      setAviso({
+        tipo: "error",
+        texto: "Adjunta al menos una foto/archivo o ingresa una calificación para registrar.",
+      });
       return;
     }
 
@@ -673,8 +854,14 @@ export default function EvaluacionEvidencias({
         ...archivosNuevos.filter((x) => x.seleccionada !== false),
       ];
 
+      const idEst = alumnoActual.id_estudiante ?? alumnoActual.id;
+
       const formData = new FormData();
-      formData.append("id_estudiante", String(alumnoActual.id_estudiante ?? alumnoActual.id));
+      formData.append("id_estudiante", String(idEst));
+      if (moduloActual.id_modulo) {
+        formData.append("id_modulo", String(moduloActual.id_modulo));
+      }
+      formData.append("modulo_nombre", moduloActual.nombre);
       if (alumnoActual.id_expediente) {
         formData.append("id_expediente", String(alumnoActual.id_expediente));
       }
@@ -688,6 +875,10 @@ export default function EvaluacionEvidencias({
       formData.append("revisado", bor.estado === "Conforme" ? "1" : "0");
       formData.append("comentario", bor.comentario || "");
       formData.append("observacion", bor.comentario || "");
+      if (notaNum !== null) {
+        formData.append("calificacion", String(notaNum));
+        formData.append("nota", String(notaNum));
+      }
       formData.append(
         "evidencias_seleccionadas",
         JSON.stringify(archivosSeleccionados.map((a) => a.id || a.name))
@@ -696,6 +887,7 @@ export default function EvaluacionEvidencias({
       archivosNuevos.forEach((item) => {
         if (item.file) {
           formData.append("archivos[]", item.file, item.name);
+          formData.append("evidencias[]", item.file, item.name);
         }
       });
 
@@ -710,6 +902,24 @@ export default function EvaluacionEvidencias({
         respuestaBD = res?.data?.data || res?.data || null;
       } catch {
         /* mantener registro local sincronizado */
+      }
+
+      if (notaNum !== null) {
+        await api
+          .post(
+            "/calificaciones-efsrt",
+            {
+              id_estudiante: idEst,
+              ...(moduloActual.id_modulo ? { id_modulo: moduloActual.id_modulo } : {}),
+              tipo_evidencia: tipoActual,
+              calificacion: notaNum,
+              nota: notaNum,
+              estado_revision: bor.estado,
+              observacion: bor.comentario || "",
+            },
+            { headers: headersAuth() }
+          )
+          .catch(() => null);
       }
 
       const archivosCombinados = [
@@ -729,10 +939,12 @@ export default function EvaluacionEvidencias({
         id_evidencia: respuestaBD?.id_evidencia ?? respuestaBD?.id ?? guardada?.id_evidencia ?? null,
         id_expediente:
           respuestaBD?.id_expediente ?? alumnoActual.id_expediente ?? guardada?.id_expediente ?? null,
-        id_estudiante: alumnoActual.id_estudiante ?? alumnoActual.id ?? null,
+        id_estudiante: idEst,
         dni: alumnoActual.dni,
+        modulo_key: moduloActual.key,
         tipo: tipoActual,
         comentario: bor.comentario,
+        calificacion: notaNum !== null ? notaNum : "",
         estado: bor.estado,
         revisado: bor.estado === "Conforme",
         fecha: new Date().toLocaleDateString("es-PE"),
@@ -744,7 +956,7 @@ export default function EvaluacionEvidencias({
 
       const nextEvals = {
         ...evals,
-        [clave]: nuevaEval,
+        [claveActual]: nuevaEval,
       };
 
       setEvals(nextEvals);
@@ -752,40 +964,16 @@ export default function EvaluacionEvidencias({
 
       setArchivos((prev) => ({
         ...prev,
-        [clave]: [],
+        [claveActual]: [],
       }));
 
-      const ref = claveAlumno(alumnoActual);
-      const evalsAlumno = TIPOS.reduce((acc, tipo) => {
-        const reg = nextEvals[`${ref}|${tipo}`];
-        if (reg) acc[tipo] = reg;
-        return acc;
-      }, {});
-
-      try {
-        localStorage.setItem(
-          `expediente_evaluaciones_${ref}`,
-          JSON.stringify(evalsAlumno)
-        );
-        const expedientePrevio = leerStorage("expediente_alumno_seleccionado", null);
-        if (
-          expedientePrevio &&
-          claveAlumno(normalizarAlumno(expedientePrevio)) === ref
-        ) {
-          localStorage.setItem(
-            "expediente_alumno_seleccionado",
-            JSON.stringify({
-              ...expedientePrevio,
-              evaluaciones_evidencias: evalsAlumno,
-            })
-          );
-        }
-      } catch {
-        /* ignorar error de storage */
-      }
-
       window.dispatchEvent(new Event("expediente:actualizado"));
-      setAviso({ tipo: "ok", texto: `${tipoActual} guardada en evidencias_efsrt.` });
+      setAviso({
+        tipo: "ok",
+        texto: `${tipoActual} (${moduloActual.nombre}) guardada${
+          notaNum !== null ? ` · Nota: ${notaNum}/20` : ""
+        }.`,
+      });
     } finally {
       setGuardando(false);
     }
@@ -812,8 +1000,8 @@ export default function EvaluacionEvidencias({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Cabecera
           t={t}
-          titulo="Evidencias de Practicantes"
-          subtitulo="Evidencias registradas en evidencias_efsrt vinculadas al expediente del alumno."
+          titulo="Evaluación y Evidencias EFSRT"
+          subtitulo="Cada estudiante aparece una sola vez; selecciona su módulo, adjunta evidencias y califica."
           pill={`Por completar: ${incompletos}`}
         />
 
@@ -828,7 +1016,6 @@ export default function EvaluacionEvidencias({
       </div>
 
       <div className="grid items-start gap-5 lg:grid-cols-[310px_minmax(0,1fr)]">
-        {/* Lista de alumnos asignados */}
         <section className={`${t.tarjeta} overflow-hidden rounded-xl`}>
           <div className={`space-y-3 border-b p-4 ${t.borde}`}>
             <div className="flex items-center justify-between gap-2">
@@ -836,7 +1023,7 @@ export default function EvaluacionEvidencias({
                 Estudiantes asignados
               </h2>
               <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${sub}`}>
-                {alumnos.length}
+                {estudiantesUnicos.length}
               </span>
             </div>
 
@@ -848,7 +1035,7 @@ export default function EvaluacionEvidencias({
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar estudiante o DNI..."
+                placeholder="Buscar estudiante, DNI o módulo..."
                 className={`w-full rounded-lg border py-2 pl-8 pr-3 text-xs outline-none ${t.entrada}`}
               />
             </div>
@@ -870,8 +1057,8 @@ export default function EvaluacionEvidencias({
             </div>
           </div>
 
-          <ul className="max-h-[600px] divide-y divide-slate-200/60 overflow-y-auto dark:divide-slate-700/60">
-            {cargandoAlumnos && alumnos.length === 0 ? (
+          <ul className="max-h-[620px] divide-y divide-slate-200/60 overflow-y-auto dark:divide-slate-700/60">
+            {cargandoAlumnos && estudiantesUnicos.length === 0 ? (
               <li className={`px-4 py-10 text-center text-xs ${secundario}`}>
                 Cargando estudiantes asignados...
               </li>
@@ -884,14 +1071,16 @@ export default function EvaluacionEvidencias({
                 No hay estudiantes asignados que coincidan.
               </li>
             ) : (
-              visibles.map((a) => {
-                const activo = claveAlumno(a) === selA;
-                const n = nRegistradas(a);
+              visibles.map((est) => {
+                const activo = est.alumnoKey === selAlumnoKey;
+                const n = nRegistradasAlumno(est);
+                const maxEv = maxEvidenciasAlumno(est);
+                const modsCount = est.modulos.filter((m) => !m.esCatalogoExtra).length || 1;
                 return (
-                  <li key={claveAlumno(a)}>
+                  <li key={est.alumnoKey}>
                     <button
                       type="button"
-                      onClick={() => elegirAlumno(a)}
+                      onClick={() => elegirAlumno(est)}
                       className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${
                         activo
                           ? d
@@ -900,26 +1089,28 @@ export default function EvaluacionEvidencias({
                           : t.fila
                       }`}
                     >
-                      <span
-                        className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg text-xs font-bold ${
-                          activo ? "bg-blue-600 text-white" : "bg-blue-600/10 text-blue-600"
-                        }`}
-                      >
-                        {iniciales(a.nombre)}
-                      </span>
+                      <AvatarEstudiante
+                        estudiante={est}
+                        className="h-9 w-9 rounded-lg text-xs font-bold"
+                        fallbackClassName={activo ? "bg-blue-600 text-white" : "bg-blue-600/10 text-blue-600"}
+                      />
 
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-bold">{a.nombre}</span>
+                        <span className="block truncate text-xs font-bold">{est.nombre}</span>
                         <span className={`mt-0.5 block truncate text-[11px] ${secundario}`}>
-                          {a.dni ? `DNI ${a.dni} · ` : ""}{a.entidad}
+                          {est.dni ? `DNI ${est.dni} · ` : ""}
+                          {modsCount} {modsCount === 1 ? "módulo" : "módulos"}
                         </span>
                       </span>
 
                       <span className="flex shrink-0 items-center gap-1 text-xs font-semibold">
-                        <span className={n === TIPOS.length ? "text-emerald-600" : secundario}>
-                          {n}/{TIPOS.length}
+                        <span className={n >= maxEv ? "text-emerald-600" : secundario}>
+                          {n}/{maxEv}
                         </span>
-                        <ChevronRight size={14} className={activo ? "text-blue-600" : secundario} />
+                        <ChevronRight
+                          size={14}
+                          className={activo ? "text-blue-600" : secundario}
+                        />
                       </span>
                     </button>
                   </li>
@@ -929,27 +1120,31 @@ export default function EvaluacionEvidencias({
           </ul>
         </section>
 
-        {/* Detalle de evidencias del alumno */}
-        {alumnoActual ? (
-          <section key={claveAlumno(alumnoActual)} className={`${t.tarjeta} rounded-xl p-5 md:p-6`}>
+        {alumnoActual && moduloActual ? (
+          <section
+            key={`${alumnoActual.alumnoKey}-${moduloActual.key}`}
+            className={`${t.tarjeta} rounded-xl p-5 md:p-6`}
+          >
             <div className={`flex flex-wrap items-start justify-between gap-4 border-b pb-4 ${t.borde}`}>
               <div className="flex items-center gap-3">
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-600 text-sm font-bold text-white">
-                  {iniciales(alumnoActual.nombre)}
-                </span>
+                <AvatarEstudiante
+                  estudiante={alumnoActual}
+                  className="h-11 w-11 rounded-xl text-sm font-bold"
+                  fallbackClassName="bg-blue-600 text-white"
+                />
                 <div>
                   <h2 className="text-base font-bold">{alumnoActual.nombre}</h2>
                   <p className={`text-xs ${secundario}`}>
                     {alumnoActual.dni ? `DNI ${alumnoActual.dni}` : ""}
-                    {alumnoActual.id_expediente ? ` · Expediente #${alumnoActual.id_expediente}` : ""}
-                    {cargandoEvidenciasBD ? " · Consultando evidencias_efsrt..." : ""}
+                    {moduloActual.id_expediente ? ` · Expediente #${moduloActual.id_expediente}` : ""}
+                    {cargandoEvidenciasBD ? " · Sincronizando evidencias..." : ""}
                   </p>
                   <p className={`mt-1 flex flex-wrap items-center gap-3 text-xs ${secundario}`}>
                     <span className="inline-flex items-center gap-1">
-                      <Building2 size={12} /> {alumnoActual.entidad}
+                      <Building2 size={12} /> {moduloActual.entidad}
                     </span>
                     <span className="inline-flex items-center gap-1">
-                      <Briefcase size={12} /> {alumnoActual.proyecto}
+                      <Briefcase size={12} /> {moduloActual.nombre}
                     </span>
                   </p>
                 </div>
@@ -965,32 +1160,77 @@ export default function EvaluacionEvidencias({
               </button>
             </div>
 
-            {/* Selector de las 3 evidencias */}
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between text-xs">
-                <span className="font-semibold">Tipo de evidencia</span>
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <Layers size={13} className="text-blue-600" />
+                  Módulo del estudiante
+                </span>
                 <span className={secundario}>
-                  {nRegistradas(alumnoActual)} de {TIPOS.length} registradas
+                  {nRegistradasModulo(alumnoActual.alumnoKey, moduloActual.key)}/{TIPOS.length} evidencias en este módulo
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {alumnoActual.modulos.map((mod) => {
+                  const activa = mod.key === moduloActual.key;
+                  const doneCount = nRegistradasModulo(alumnoActual.alumnoKey, mod.key);
+                  return (
+                    <button
+                      key={mod.key}
+                      type="button"
+                      onClick={() => elegirModulo(mod.key)}
+                      aria-pressed={activa}
+                      className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-semibold transition ${foco} ${
+                        activa
+                          ? "border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-600/25"
+                          : t.boton
+                      }`}
+                    >
+                      <span>{mod.nombre}</span>
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                          activa
+                            ? "bg-white/20 text-white"
+                            : d
+                              ? "bg-slate-800 text-slate-300"
+                              : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {doneCount}/{TIPOS.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <Sparkles size={13} className="text-blue-600" />
+                  Tipo de evidencia
+                </span>
+                <span className={secundario}>
+                  {nRegistradasModulo(alumnoActual.alumnoKey, moduloActual.key)} de {TIPOS.length} registradas
                 </span>
               </div>
 
               <div className="grid gap-2 sm:grid-cols-3">
-                {TIPOS.map((tipo, i) => {
-                  const est = estadoEv(alumnoActual, tipo);
+                {TIPOS.map((tObj, i) => {
+                  const est = estadoEv(alumnoActual.alumnoKey, moduloActual.key, tObj.id);
                   const act = i === tipoIdx;
                   return (
                     <button
-                      key={tipo}
+                      key={tObj.id}
                       type="button"
                       onClick={() => elegirTipo(i)}
                       aria-pressed={act}
                       className={`cursor-pointer rounded-xl border px-3.5 py-2.5 text-left transition ${foco} ${
-                        act
-                          ? "border-blue-600 bg-blue-600 text-white"
-                          : `${t.boton}`
+                        act ? "border-blue-600 bg-blue-600 text-white" : t.boton
                       }`}
                     >
-                      <div className="truncate text-xs font-semibold">{tipo}</div>
+                      <div className="truncate text-xs font-semibold">{tObj.id}</div>
                       <div
                         className={`mt-0.5 text-[11px] ${act ? "text-white/85" : ""}`}
                         style={act ? undefined : { color: COLOR_ESTADO[est] }}
@@ -1003,17 +1243,17 @@ export default function EvaluacionEvidencias({
               </div>
             </div>
 
-            {/* Editor de evidencia */}
-            <div key={clave} className="mt-5 space-y-5">
+            <div key={claveActual} className="mt-5 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-bold">{tipoActual}</h3>
-                  <p className={`text-xs ${secundario}`}>{AYUDA_TIPO[tipoActual]}</p>
+                  <p className={`text-xs ${secundario}`}>{tipoActualObj.ayuda}</p>
                 </div>
-                <Chip estado={estadoEv(alumnoActual, tipoActual)} />
+                <Chip
+                  estado={estadoEv(alumnoActual.alumnoKey, moduloActual.key, tipoActual)}
+                />
               </div>
 
-              {/* Adjuntar varias fotos/archivos y elegir cuáles revisar */}
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="inline-flex items-center gap-1.5 font-semibold">
@@ -1021,12 +1261,17 @@ export default function EvaluacionEvidencias({
                     Fotos y archivos de evidencia
                   </span>
                   <span className={secundario}>
-                    Elegidas para revisión: <b className="text-blue-600">{archivosSeleccionadosCount}</b> / {totalArchivosEvidencia}
+                    Elegidas para revisión:{" "}
+                    <b className="text-blue-600">{archivosSeleccionadosCount}</b> /{" "}
+                    {totalArchivosEvidencia}
                   </span>
                 </div>
 
                 <label
-                  onDragOver={(e) => { e.preventDefault(); setArrastrando(true); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setArrastrando(true);
+                  }}
                   onDragLeave={() => setArrastrando(false)}
                   onDrop={soltarArchivos}
                   className={`flex cursor-pointer items-center gap-3 rounded-xl border border-dashed px-4 py-4 transition ${
@@ -1075,7 +1320,11 @@ export default function EvaluacionEvidencias({
                           title={sel ? "Elegida para revisar" : "Elegir para revisar"}
                           className="text-blue-600"
                         >
-                          {sel ? <CheckSquare size={16} /> : <Square size={16} className={secundario} />}
+                          {sel ? (
+                            <CheckSquare size={16} />
+                          ) : (
+                            <Square size={16} className={secundario} />
+                          )}
                         </button>
 
                         {item.esFoto && item.url ? (
@@ -1134,7 +1383,11 @@ export default function EvaluacionEvidencias({
                           title={sel ? "Elegida para revisar" : "Elegir para revisar"}
                           className="text-blue-600"
                         >
-                          {sel ? <CheckSquare size={16} /> : <Square size={16} className={secundario} />}
+                          {sel ? (
+                            <CheckSquare size={16} />
+                          ) : (
+                            <Square size={16} className={secundario} />
+                          )}
                         </button>
 
                         {archivo.esFoto && archivo.previewUrl ? (
@@ -1152,7 +1405,8 @@ export default function EvaluacionEvidencias({
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{archivo.name}</p>
                           <p className={`text-[10px] ${secundario}`}>
-                            {formatoPeso(archivo.size)} · {sel ? "Elegida para revisión" : "No elegida"}
+                            {formatoPeso(archivo.size)} ·{" "}
+                            {sel ? "Elegida para revisión" : "No elegida"}
                           </p>
                         </div>
 
@@ -1190,31 +1444,58 @@ export default function EvaluacionEvidencias({
                 </div>
               </div>
 
-              {/* Estado y observaciones */}
-              <div className="space-y-3">
-                <p className="text-xs font-semibold">Estado de la revisión</p>
-                <div className="flex flex-wrap gap-2">
-                  {ESTADOS_REVISION.map((est) => {
-                    const act = bor.estado === est;
-                    const c = COLOR_ESTADO[est];
-                    return (
-                      <button
-                        key={est}
-                        type="button"
-                        onClick={() => setBor({ estado: est })}
-                        className={`cursor-pointer rounded-lg border px-3.5 py-1.5 text-xs font-semibold transition ${foco} ${
-                          act ? "text-white" : t.boton
-                        }`}
-                        style={act ? { background: c, borderColor: c } : undefined}
-                      >
-                        {est}
-                      </button>
-                    );
-                  })}
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold">Estado de la revisión</p>
+                    <div className="flex flex-wrap gap-2">
+                      {ESTADOS_REVISION.map((est) => {
+                        const act = bor.estado === est;
+                        const c = COLOR_ESTADO[est];
+                        return (
+                          <button
+                            key={est}
+                            type="button"
+                            onClick={() => setBor({ estado: est })}
+                            className={`cursor-pointer rounded-lg border px-3.5 py-1.5 text-xs font-semibold transition ${foco} ${
+                              act ? "text-white" : t.boton
+                            }`}
+                            style={act ? { background: c, borderColor: c } : undefined}
+                          >
+                            {est}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="w-36">
+                    <label
+                      htmlFor="ev-nota"
+                      className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold"
+                    >
+                      <Award size={13} className="text-blue-600" />
+                      Calificación (0–20)
+                    </label>
+                    <input
+                      id="ev-nota"
+                      type="number"
+                      min={0}
+                      max={20}
+                      step="0.5"
+                      value={bor.calificacion}
+                      onChange={(e) => setBor({ calificacion: e.target.value })}
+                      placeholder="Ej. 16"
+                      className={`w-full rounded-lg border px-3 py-1.5 text-xs font-semibold outline-none ${t.entrada}`}
+                    />
+                  </div>
                 </div>
 
                 <div>
-                  <label htmlFor="ev-com" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
+                  <label
+                    htmlFor="ev-com"
+                    className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold"
+                  >
                     <MessageSquare size={13} />
                     Comentarios y observaciones
                   </label>
@@ -1229,7 +1510,6 @@ export default function EvaluacionEvidencias({
                 </div>
               </div>
 
-              {/* Pie y guardar */}
               <div className={`flex flex-wrap items-center justify-between gap-3 border-t pt-4 ${t.borde}`}>
                 <div className="text-xs">
                   {aviso ? (
@@ -1238,7 +1518,11 @@ export default function EvaluacionEvidencias({
                         aviso.tipo === "ok" ? "text-emerald-600" : "text-rose-500"
                       }`}
                     >
-                      {aviso.tipo === "ok" ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                      {aviso.tipo === "ok" ? (
+                        <CheckCircle2 size={14} />
+                      ) : (
+                        <AlertCircle size={14} />
+                      )}
                       {aviso.texto}
                     </span>
                   ) : sucio ? (
@@ -1255,17 +1539,24 @@ export default function EvaluacionEvidencias({
                   className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60 ${foco}`}
                 >
                   <ClipboardCheck size={15} />
-                  {guardando ? "Guardando..." : guardada ? "Actualizar evidencia" : "Guardar evidencia"}
+                  {guardando
+                    ? "Guardando..."
+                    : guardada
+                      ? "Actualizar y calificar"
+                      : "Guardar evidencia"}
                 </button>
               </div>
             </div>
           </section>
         ) : (
-          <section className={`${t.tarjeta} flex min-h-[380px] flex-col items-center justify-center rounded-xl p-8 text-center`}>
+          <section
+            className={`${t.tarjeta} flex min-h-[380px] flex-col items-center justify-center rounded-xl p-8 text-center`}
+          >
             <Users size={28} className="mb-3 text-blue-600" />
             <h3 className="text-sm font-bold">Selecciona un estudiante asignado</h3>
             <p className={`mt-1 max-w-xs text-xs ${secundario}`}>
-              Elige un alumno de la lista para ver sus evidencias de <code>evidencias_efsrt</code>.
+              Elige un alumno de la lista para ver sus evidencias de{" "}
+              <code>evidencias_efsrt</code>.
             </p>
           </section>
         )}

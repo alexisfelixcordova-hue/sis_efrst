@@ -12,12 +12,13 @@ class ModuloController extends Controller
     {
         $query = Modulo::query();
 
-        if ($request->has('search') && !empty($request->search)) {
-            $search = $request->search;
+        if ($request->filled('search')) {
+            $search = trim((string) $request->search);
             $query->where('nombre_modulo', 'ILIKE', "%{$search}%");
         }
 
-        $modulos = $query->orderBy('id_modulo', 'desc')->paginate(10);
+        $perPage = max(1, min(100, (int) $request->input('per_page', 10)));
+        $modulos = $query->orderBy('id_modulo', 'desc')->paginate($perPage);
 
         return response()->json([
             'success' => true,
@@ -27,13 +28,15 @@ class ModuloController extends Controller
 
     public function store(Request $request)
     {
-        $request->validate([
-            'numero_modulo' => 'required|integer',
+        abort_unless((int) ($request->user()?->id_rol ?? 0) === 1, 403, 'Se requiere rol de Administrador.');
+
+        $datos = $request->validate([
+            'numero_modulo' => 'required|integer|min:1',
             'nombre_modulo' => 'required|string|max:150',
-            'horas_requeridas' => 'required|integer',
+            'horas_requeridas' => 'required|integer|min:1',
         ]);
 
-        $modulo = Modulo::create($request->all());
+        $modulo = Modulo::create($datos);
 
         return response()->json([
             'success' => true,
@@ -61,6 +64,8 @@ class ModuloController extends Controller
 
     public function update(Request $request, $id)
     {
+        abort_unless((int) ($request->user()?->id_rol ?? 0) === 1, 403, 'Se requiere rol de Administrador.');
+
         $modulo = Modulo::find($id);
 
         if (!$modulo) {
@@ -70,13 +75,13 @@ class ModuloController extends Controller
             ], 404);
         }
 
-        $request->validate([
-            'numero_modulo' => 'sometimes|integer',
+        $datos = $request->validate([
+            'numero_modulo' => 'sometimes|integer|min:1',
             'nombre_modulo' => 'sometimes|string|max:150',
-            'horas_requeridas' => 'sometimes|integer',
+            'horas_requeridas' => 'sometimes|integer|min:1',
         ]);
 
-        $modulo->update($request->all());
+        $modulo->update($datos);
 
         return response()->json([
             'success' => true,
@@ -85,8 +90,10 @@ class ModuloController extends Controller
         ], 200);
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
+        abort_unless((int) ($request->user()?->id_rol ?? 0) === 1, 403, 'Se requiere rol de Administrador.');
+
         $modulo = Modulo::find($id);
 
         if (!$modulo) {

@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from "react";
+import api from "../../../../api/axios.js";
 
-export const API = "http://localhost:8000/api"; // mismo valor que en App.jsx
 export const HORAS_TOTALES = 480;
 
 /* Colores compartidos (claro y oscuro) */
@@ -45,11 +45,7 @@ export function useMisAlumnos() {
     setCargando(true);
     setError("");
     try {
-      const res = await fetch(`${API}/docentes/${id}`, {
-        headers: { Accept: "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || `Error ${res.status} al cargar tus alumnos`);
+      const { data } = await api.get(`/docentes/${id}`);
       setAlumnos((data.alumnos ?? []).map((a) => ({ ...a, hrs: Number(a.hrs) || 0 })));
     } catch (e) {
       setError(e.message);

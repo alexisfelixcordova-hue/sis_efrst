@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowLeft, Copy, Check, UserPlus, UserCheck, Mail, Repeat, GraduationCap } from "lucide-react";
 import { datosAcademicos, datosDocente, formatCiclo } from "./DatosPersonales";
+import AvatarEstudiante from "../../../AvatarEstudiante.jsx";
 
 const HORAS_TOTALES = 480;
 
@@ -104,19 +105,20 @@ export default function CabeceraExpediente({
           {/* Foto de perfil (solo lectura) */}
           <div className="relative">
             <div
-              className={`flex h-28 w-28 items-center justify-center overflow-hidden rounded-full text-3xl font-bold ring-4 ring-offset-4 sm:h-32 sm:w-32 sm:text-4xl ${
+              className={`h-28 w-28 overflow-hidden rounded-full text-3xl font-bold ring-4 ring-offset-4 sm:h-32 sm:w-32 sm:text-4xl ${
                 asignado ? "ring-emerald-500/50" : "ring-amber-400/50"
               } ${
                 dm
-                  ? "bg-slate-700 text-blue-200 ring-offset-[#1e293b]"
-                  : "bg-blue-50 text-blue-700 ring-offset-white"
+                  ? "ring-offset-[#1e293b]"
+                  : "ring-offset-white"
               }`}
             >
-              {estudiante?.foto ? (
-                <img src={estudiante.foto} alt={nombreCompleto} className="h-full w-full object-cover" />
-              ) : (
-                iniciales(nombreCompleto)
-              )}
+              <AvatarEstudiante
+                estudiante={estudiante}
+                alt={nombreCompleto}
+                className="h-full w-full rounded-full text-3xl font-bold sm:text-4xl"
+                fallbackClassName={dm ? "bg-slate-700 text-blue-200" : "bg-blue-50 text-blue-700"}
+              />
             </div>
             <span
               className={`absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full border-[3px] text-white shadow ${

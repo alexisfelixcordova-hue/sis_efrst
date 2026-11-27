@@ -1,9 +1,8 @@
 import { useState } from "react";
+import api from "../../../../api/axios.js";
 import {
   ShieldCheck, KeyRound, Lock, Eye, EyeOff, CheckCircle2, ShieldHalf, RefreshCcw, Check, Info,
 } from "lucide-react";
-
-const API = "http://localhost:8000/api"; // mismo valor que en App.jsx
 
 const caja = "flex h-10 items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 focus-within:border-blue-500";
 const input = "w-full bg-transparent text-[13px] outline-none placeholder:text-gray-400";
@@ -40,40 +39,25 @@ export default function SeguridadAcceso() {
     setMensaje("");
 
     try {
-      const res = await fetch(`${API}/perfil/password`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-        body: JSON.stringify({
+      const { data } = await api.put("/perfil/password", {
           password_actual: actual,
           password_nueva: nueva,
           password_nueva_confirmation: confirmar,
-        }),
       });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setEsError(true);
-        setMensaje(data.message || "No se pudo actualizar la contraseña");
-        return;
-      }
 
       setEsError(false);
-      setMensaje(data.message);
+      setMensaje(data.message || "Contraseña actualizada correctamente");
       limpiar();
-    } catch {
+    } catch (error) {
       setEsError(true);
-      setMensaje("No se pudo conectar con el servidor");
+      setMensaje(error?.response?.data?.message || "No se pudo conectar con el servidor");
     }
   };
 
   return (
-    <div className="flex items-start gap-5">
+    <div className="flex min-w-0 flex-col items-stretch gap-5 md:flex-row md:items-start">
       {/* Panel izquierdo */}
-      <aside className="w-[305px] shrink-0 space-y-5 rounded-3xl border border-gray-200 bg-white p-5 text-xs">
+      <aside className="w-full space-y-5 rounded-3xl border border-gray-200 bg-white p-5 text-xs md:w-[305px] md:shrink-0">
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-3">
             <ShieldCheck size={17} strokeWidth={1.8} className="mt-0.5" />

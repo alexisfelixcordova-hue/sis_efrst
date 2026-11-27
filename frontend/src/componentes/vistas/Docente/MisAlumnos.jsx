@@ -14,9 +14,14 @@ import {
   Layers,
   AlertCircle,
   UserX,
-  FileText,
 } from "lucide-react";
-import api, { clearApiCache } from "../../../api/axios";
+import api, { invalidateApiCache } from "../../../api/axios";
+import AvatarEstudiante from "../../AvatarEstudiante.jsx";
+import {
+  normalizarNombreModulo,
+  publicarModuloSistema,
+  useModuloSistema,
+} from "../../../utils/moduloSistema";
 
 const POR_PAGINA = 8;
 const CACHE_MEMORIA = {
@@ -138,20 +143,15 @@ const PALETA_MODULOS = [
   "#ef4444",
 ];
 
-const iniciales = (a) =>
-  `${(a.nombres || a.nombre || "?").trim().charAt(0)}${(a.apellidos || "")
-    .trim()
-    .charAt(0)}`.toUpperCase();
-
 const nombreCompleto = (a) => {
   const nom = a.nombres || a.nombre || "";
   return a.apellidos ? `${a.apellidos}, ${nom}` : nom || "Sin nombre";
 };
 
 const moduloDe = (a) =>
-  limpiarTextoModulo(
-    a.modulo_nombre || a.nombre_modulo || a.modulo || "Módulo EFSRT"
-  ) || "Módulo EFSRT";
+  normalizarNombreModulo(
+    a.modulo_nombre || a.nombre_modulo || a.modulo || "Nombre de módulo no disponible"
+  );
 
 const estadoDe = (a) => {
   const raw = String(a?.estado || a?.estado_efsrt || "").trim();
@@ -201,6 +201,7 @@ const useMontado = () => {
 };
 
 export default function MisAlumnos({ darkMode = false }) {
+  const moduloSistema = useModuloSistema();
   const claveSesion = useMemo(() => obtenerClaveSesion(), []);
   const cacheInicial = useMemo(
     () => leerCachePersistencia(claveSesion),
@@ -210,6 +211,11 @@ export default function MisAlumnos({ darkMode = false }) {
   const [alumnos, setAlumnos] = useState(() => cacheInicial?.alumnos ?? []);
   const [modulos, setModulos] = useState(() => cacheInicial?.modulos ?? []);
   const [moduloSeleccionado, setModuloSeleccionado] = useState("todos");
+  const moduloSeleccionadoActivo = moduloSistema?.all
+    ? "todos"
+    : moduloSistema?.id_modulo
+      ? String(moduloSistema.id_modulo)
+      : moduloSeleccionado;
   const [busqueda, setBusqueda] = useState("");
   const [cargando, setCargando] = useState(
     () => !(cacheInicial?.alumnos?.length > 0)
@@ -219,12 +225,12 @@ export default function MisAlumnos({ darkMode = false }) {
   const [pagina, setPagina] = useState(1);
 
   const sincronizarDatos = useCallback(
-    async ({ forzarSpinner = false } = {}) => {
+    async ({ forzarSpinner = false, forzarRed = false } = {}) => {
       const claveActual = obtenerClaveSesion();
       const cached = leerCachePersistencia(claveActual);
 
-      if (forzarSpinner) {
-        clearApiCache();
+      if (forzarRed) {
+        invalidateApiCache("/mis-alumnos");
       }
 
       if (cached && !forzarSpinner) {
@@ -294,7 +300,7 @@ export default function MisAlumnos({ darkMode = false }) {
 
   useEffect(() => {
     setPagina(1);
-  }, [busqueda, moduloSeleccionado, vista]);
+  }, [busqueda, moduloSeleccionadoActivo, vista]);
 
   // Filtros de módulos sin duplicados por escritura distinta (ej. "Palicaciones" vs "Aplicaciones")
   const filtros = useMemo(() => {
@@ -326,11 +332,39 @@ export default function MisAlumnos({ darkMode = false }) {
     () =>
       filtros.find(
         (f) =>
-          f.id === String(moduloSeleccionado) ||
-          f.canon === claveCanonModulo(moduloSeleccionado)
+         f.id === String(moduloSeleccionadoActivo) ||
+         f.canon === claveCanonModulo(moduloSeleccionadoActivo)
       ) || filtros[0],
-    [filtros, moduloSeleccionado]
+    [filtros, moduloSeleccionadoActivo]
   );
+  const cambiarFiltroModulo = (filtro) => {
+    setModuloSeleccionado(filtro.id);
+    if (filtro.id === "todos") {
+      publicarModuloSistema(null);
+      return;
+    }
+
+    const moduloCatalogo = modulos.find(
+      (modulo) => String(obtenerIdModulo(modulo)) === String(filtro.id)
+    );
+    if (moduloCatalogo) {
+      publicarModuloSistema(moduloCatalogo);
+      return;
+    }
+
+    const asignacion = alumnos.find(
+      (alumno) =>
+        String(alumno.id_modulo ?? alumno.modulo_id ?? "") ===
+        String(filtro.id)
+    );
+    if (asignacion?.id_modulo || asignacion?.modulo_id) {
+      publicarModuloSistema({
+        id_modulo: asignacion.id_modulo ?? asignacion.modulo_id,
+        numero_modulo: asignacion.numero_modulo,
+        nombre_modulo: moduloDe(asignacion),
+      });
+    }
+  };
 
   // Distribuye claramente:
   // - Si se selecciona un módulo específico, muestra la asignación de ese módulo.
@@ -339,7 +373,8 @@ export default function MisAlumnos({ darkMode = false }) {
   const alumnosFiltrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     const filtrandoPorModulo =
-      moduloSeleccionado !== "todos" && filtroActivoObj?.id !== "todos";
+      moduloSeleccionadoActivo !== "todos" &&
+      (Boolean(moduloSistema?.id_modulo) || filtroActivoObj?.id !== "todos");
 
     const coinciden = alumnos.filter((alumno) => {
       const modNombre = moduloDe(alumno);
@@ -399,7 +434,13 @@ export default function MisAlumnos({ darkMode = false }) {
     });
 
     return Array.from(agrupadosMap.values());
-  }, [alumnos, busqueda, moduloSeleccionado, filtroActivoObj]);
+  }, [
+    alumnos,
+    busqueda,
+    moduloSeleccionadoActivo,
+    moduloSistema?.id_modulo,
+    filtroActivoObj,
+  ]);
 
   const resumen = useMemo(() => {
     const porModulo = {};
@@ -465,7 +506,7 @@ export default function MisAlumnos({ darkMode = false }) {
         pie: "bg-slate-50",
       };
 
-  const hayFiltros = busqueda.trim() || moduloSeleccionado !== "todos";
+  const hayFiltros = busqueda.trim() || moduloSeleccionadoActivo !== "todos";
 
   const Estado = ({ valor }) => {
     const c = colorEstado(valor);
@@ -512,30 +553,19 @@ export default function MisAlumnos({ darkMode = false }) {
       <style>{ESTILOS}</style>
 
       <div className="ma-up flex flex-col justify-between gap-4 md:flex-row md:items-center">
-        <div className="flex items-center gap-4">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-blue-600 text-white shadow-sm shadow-blue-600/25">
-            <Users size={22} />
-          </span>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight">
-                Mis Alumnos Asignados
-              </h1>
-              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600">
-                <FileText size={12} />
-                Módulo ≠ Expediente
-              </span>
-            </div>
-            <p className={`mt-0.5 text-sm ${tema.secundario}`}>
-              Distribución ordenada por módulo EFSRT, contacto y expediente del
-              practicante.
-            </p>
-          </div>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-extrabold leading-tight tracking-tight">
+            Mis Alumnos Asignados
+          </h1>
+          <p className={`mt-1 text-sm ${tema.secundario}`}>
+            Distribución ordenada por módulo EFSRT, contacto y expediente del
+            practicante.
+          </p>
         </div>
 
         <button
           type="button"
-          onClick={() => sincronizarDatos({ forzarSpinner: true })}
+          onClick={() => sincronizarDatos({ forzarSpinner: true, forzarRed: true })}
           className={`inline-flex items-center gap-2 self-start rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-sm transition active:scale-95 md:self-auto ${tema.tarjeta} ${tema.texto} hover:border-blue-600 hover:text-blue-600`}
         >
           <RefreshCcw size={15} className={cargando ? "animate-spin" : ""} />
@@ -693,12 +723,16 @@ export default function MisAlumnos({ darkMode = false }) {
             aria-label="Filtrar por módulo profesional"
           >
             {filtros.map((f) => {
-              const act = filtroActivoObj?.id === f.id;
+              const act = moduloSistema?.all
+                ? f.id === "todos"
+                : moduloSistema?.id_modulo
+                  ? String(moduloSistema.id_modulo) === String(f.id)
+                  : filtroActivoObj?.id === f.id;
               return (
                 <button
                   key={f.id}
                   type="button"
-                  onClick={() => setModuloSeleccionado(f.id)}
+                  onClick={() => cambiarFiltroModulo(f)}
                   aria-pressed={act}
                   className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 active:scale-95 ${
                     act
@@ -743,7 +777,7 @@ export default function MisAlumnos({ darkMode = false }) {
             <p className="text-sm font-semibold">{error}</p>
             <button
               type="button"
-              onClick={() => sincronizarDatos({ forzarSpinner: true })}
+              onClick={() => sincronizarDatos({ forzarSpinner: true, forzarRed: true })}
               className="mt-3 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 active:scale-95"
             >
               <RefreshCcw size={13} /> Reintentar
@@ -764,16 +798,22 @@ export default function MisAlumnos({ darkMode = false }) {
                 ? "Prueba con otra búsqueda o módulo."
                 : "Cuando se te asignen practicantes aparecerán aquí."}
             </p>
+            {alumnosFiltrados.length === 0 && alumnos.length > 0 && (
+              <p className={`mt-1 text-xs ${tema.secundario}`}>
+                Hay {alumnos.length} asignaciones registradas en otros módulos o periodos.
+              </p>
+            )}
             {hayFiltros && (
               <button
                 type="button"
                 onClick={() => {
                   setBusqueda("");
                   setModuloSeleccionado("todos");
+                  publicarModuloSistema(null);
                 }}
                 className="mt-3 rounded-lg border border-blue-600 px-4 py-2 text-xs font-semibold text-blue-600 transition hover:bg-blue-600 hover:text-white"
               >
-                Limpiar filtros
+                Ver todos los módulos
               </button>
             )}
           </div>
@@ -822,12 +862,11 @@ export default function MisAlumnos({ darkMode = false }) {
                       <td className="relative px-6 py-3.5">
                         <span className="absolute bottom-2.5 left-0 top-2.5 w-1 origin-center scale-y-0 rounded-r bg-blue-600 transition-transform group-hover:scale-y-100" />
                         <div className="flex items-center gap-3.5">
-                          <span
-                            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-bold"
-                            style={{ background: `${c}1a`, color: c }}
-                          >
-                            {iniciales(alumno)}
-                          </span>
+                          <AvatarEstudiante
+                            estudiante={alumno}
+                            className="h-10 w-10 rounded-xl text-xs font-bold"
+                            fallbackStyle={{ background: `${c}1a`, color: c }}
+                          />
                           <div className="min-w-0 leading-tight">
                             <p className="truncate font-semibold">
                               {nombreCompleto(alumno)}
@@ -920,12 +959,11 @@ export default function MisAlumnos({ darkMode = false }) {
                     style={{ background: c }}
                   />
                   <div className="flex items-center gap-3.5">
-                    <span
-                      className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl text-sm font-bold"
-                      style={{ background: `${c}1a`, color: c }}
-                    >
-                      {iniciales(alumno)}
-                    </span>
+                    <AvatarEstudiante
+                      estudiante={alumno}
+                      className="h-12 w-12 rounded-2xl text-sm font-bold"
+                      fallbackStyle={{ background: `${c}1a`, color: c }}
+                    />
                     <div className="min-w-0 leading-tight">
                       <p className="truncate font-bold">
                         {nombreCompleto(alumno)}

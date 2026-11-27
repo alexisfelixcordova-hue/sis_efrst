@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -80,6 +81,13 @@ class DashboardController extends Controller
 
     public function resumen(Request $request)
     {
+        if ((int) ($request->user()?->id_rol ?? 0) !== 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Las estadísticas institucionales son exclusivas del Administrador.',
+            ], 403);
+        }
+
         $periodo = $request->query('periodo', 'Sem');
         $tablaExp = $this->tablaExpedientes();
 
@@ -87,18 +95,42 @@ class DashboardController extends Controller
         $totalDocentes = $this->contarDocentes();
 
         $totalRevisiones = 0;
+        $revisionesValidadas = 0;
         $horasValidadas = 0;
         $observados = 0;
+        $colEstado = null;
+        $colHoras = null;
+        $colFecha = null;
+        $estadosValidados = ['CALIFICADO', 'APROBADO', 'CERRADO', 'COMPLETADO', 'VALIDADO', 'VERIFICADO'];
 
         if ($tablaExp) {
             $totalRevisiones = DB::table($tablaExp)->count();
-            if (Schema::hasColumn($tablaExp, 'horas')) {
-                $horasValidadas = Schema::hasColumn($tablaExp, 'estado')
-                    ? (int) DB::table($tablaExp)->whereRaw("LOWER(estado) = 'aprobado'")->sum('horas')
-                    : (int) DB::table($tablaExp)->sum('horas');
+            $colEstado = collect(['estado_efsrt', 'estado_revision', 'estado'])
+                ->first(fn ($col) => Schema::hasColumn($tablaExp, $col));
+            $colHoras = collect(['horas_acumuladas', 'horas', 'hrs'])
+                ->first(fn ($col) => Schema::hasColumn($tablaExp, $col));
+            $colFecha = collect(['fecha_validacion', 'created_at', 'fecha_inicio', 'updated_at'])
+                ->first(fn ($col) => Schema::hasColumn($tablaExp, $col));
+
+            if ($colEstado) {
+                $estadoNormalizado = DB::raw("UPPER(TRIM(COALESCE($colEstado, '')))");
+                $revisionesValidadas = (int) DB::table($tablaExp)
+                    ->whereIn($estadoNormalizado, $estadosValidados)
+                    ->count();
+                $observados = (int) DB::table($tablaExp)
+                    ->where($estadoNormalizado, 'OBSERVADO')
+                    ->count();
             }
-            if (Schema::hasColumn($tablaExp, 'estado')) {
-                $observados = (int) DB::table($tablaExp)->whereRaw("LOWER(estado) = 'observado'")->count();
+
+            if ($colHoras) {
+                $queryHoras = DB::table($tablaExp);
+                if ($colEstado) {
+                    $queryHoras->whereIn(
+                        DB::raw("UPPER(TRIM(COALESCE($colEstado, '')))"),
+                        $estadosValidados
+                    );
+                }
+                $horasValidadas = (int) $queryHoras->sum($colHoras);
             }
         }
 
@@ -114,8 +146,8 @@ class DashboardController extends Controller
         $sparkLine = [];
         for ($i = 6; $i >= 0; $i--) {
             $fecha = now()->subDays($i)->toDateString();
-            $cnt = ($tablaExp && Schema::hasColumn($tablaExp, 'created_at'))
-                ? DB::table($tablaExp)->whereDate('created_at', $fecha)->count()
+            $cnt = ($tablaExp && $colFecha)
+                ? DB::table($tablaExp)->whereDate($colFecha, $fecha)->count()
                 : 0;
             $sparkLine[] = ['v' => max($cnt, $totalRevisiones > 0 ? 1 : 0)];
         }
@@ -128,14 +160,15 @@ class DashboardController extends Controller
         foreach ($diasMap as $isoDia => $etiquetaDia) {
             $ok = 0;
             $obs = 0;
-            if ($tablaExp && Schema::hasColumn($tablaExp, 'created_at') && Schema::hasColumn($tablaExp, 'estado')) {
+            if ($tablaExp && $colFecha && $colEstado) {
+                $estadoNormalizado = DB::raw("UPPER(TRIM(COALESCE($colEstado, '')))");
                 $ok = (int) DB::table($tablaExp)
-                    ->whereRaw('EXTRACT(ISODOW FROM created_at) = ?', [$isoDia])
-                    ->whereRaw("LOWER(estado) = 'aprobado'")
+                    ->whereRaw("EXTRACT(ISODOW FROM $colFecha) = ?", [$isoDia])
+                    ->whereIn($estadoNormalizado, $estadosValidados)
                     ->count();
                 $obs = (int) DB::table($tablaExp)
-                    ->whereRaw('EXTRACT(ISODOW FROM created_at) = ?', [$isoDia])
-                    ->whereRaw("LOWER(estado) = 'observado'")
+                    ->whereRaw("EXTRACT(ISODOW FROM $colFecha) = ?", [$isoDia])
+                    ->where($estadoNormalizado, 'OBSERVADO')
                     ->count();
             }
             if ($ok === 0 && $obs === 0 && $totalRevisiones > 0) {
@@ -180,8 +213,8 @@ class DashboardController extends Controller
             ];
         }
 
-        $meta = $totalAlumnos > 0
-            ? min(100, (int) round(($totalRevisiones / max(1, $totalAlumnos)) * 100))
+        $meta = $totalRevisiones > 0
+            ? min(100, (int) round(($revisionesValidadas / $totalRevisiones) * 100))
             : 0;
 
         return response()->json([

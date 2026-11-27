@@ -1,1 +1,167 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Responsive safeguards shared by every view */
+html,
+body,
+#root {
+  min-width: 0;
+  min-height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+.app-main-content > :not(style) {
+  padding: 0 !important;
+}
+
+.app-theme-dark {
+  color-scheme: dark;
+}
+
+.app-theme-dark [class~="bg-white"],
+.app-theme-dark [class~="bg-slate-50"],
+.app-theme-dark [class~="bg-gray-50"],
+.app-theme-dark [class~="bg-[#f4f6fa]"],
+.app-theme-dark [class~="bg-[#f5f8fc]"],
+.app-theme-dark [class~="bg-[#f7f8fb]"],
+.app-theme-dark [class~="bg-[#f9fafb]"] {
+  background-color: #172337 !important;
+}
+
+.app-theme-dark [class~="bg-slate-100"],
+.app-theme-dark [class~="bg-gray-100"],
+.app-theme-dark [class~="bg-[#f3f4f6]"] {
+  background-color: #1e293b !important;
+}
+
+.app-theme-dark [class~="bg-blue-50"],
+.app-theme-dark [class~="bg-[#e8f0ff]"] {
+  background-color: rgb(37 99 235 / 14%) !important;
+}
+
+.app-theme-dark [class~="bg-emerald-50"],
+.app-theme-dark [class~="bg-[#e6f7ee]"] {
+  background-color: rgb(16 185 129 / 14%) !important;
+}
+
+.app-theme-dark [class~="bg-amber-50"],
+.app-theme-dark [class~="bg-[#fff3df]"] {
+  background-color: rgb(245 158 11 / 14%) !important;
+}
+
+.app-theme-dark [class~="bg-red-50"],
+.app-theme-dark [class~="bg-rose-50"],
+.app-theme-dark [class~="bg-[#fde8ea]"] {
+  background-color: rgb(244 63 94 / 14%) !important;
+}
+
+.app-theme-dark [class~="sidebar-theme-thumb"] {
+  background-color: #fff !important;
+}
+
+.app-theme-dark [class~="border-slate-100"],
+.app-theme-dark [class~="border-slate-200"],
+.app-theme-dark [class~="border-gray-100"],
+.app-theme-dark [class~="border-gray-200"],
+.app-theme-dark [class~="border-[#eceef3]"],
+.app-theme-dark [class~="border-[#e3e6ee]"],
+.app-theme-dark [class~="border-[#f0f2f6]"] {
+  border-color: #334155 !important;
+}
+
+.app-theme-dark [class~="text-slate-900"],
+.app-theme-dark [class~="text-slate-800"],
+.app-theme-dark [class~="text-gray-900"],
+.app-theme-dark [class~="text-gray-800"],
+.app-theme-dark [class~="text-[#111827]"],
+.app-theme-dark [class~="text-[#172b4d]"] {
+  color: #e2e8f0 !important;
+}
+
+.app-theme-dark [class~="text-slate-600"],
+.app-theme-dark [class~="text-slate-500"],
+.app-theme-dark [class~="text-gray-600"],
+.app-theme-dark [class~="text-gray-500"],
+.app-theme-dark [class~="text-[#6b7280]"],
+.app-theme-dark [class~="text-[#8b92a5]"],
+.app-theme-dark [class~="text-[#9aa1b2]"] {
+  color: #94a3b8 !important;
+}
+
+.app-theme-dark [class~="text-red-600"],
+.app-theme-dark [class~="text-rose-600"],
+.app-theme-dark [class~="text-[#ef4444]"] {
+  color: #fb7185 !important;
+}
+
+.app-theme-dark [class~="text-emerald-600"],
+.app-theme-dark [class~="text-[#16a34a]"] {
+  color: #34d399 !important;
+}
+
+.app-theme-dark [class~="text-amber-600"] {
+  color: #fbbf24 !important;
+}
+
+.app-theme-dark [class~="text-[#2f6bff]"] {
+  color: #60a5fa !important;
+}
+
+.app-theme-dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.app-theme-dark select,
+.app-theme-dark textarea {
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+.app-theme-dark input::placeholder,
+.app-theme-dark textarea::placeholder {
+  color: #94a3b8;
+}
+
+.app-theme-dark .dashboard-admin .recharts-cartesian-grid line,
+.app-theme-dark .reportes-page [stroke="#e2e8f0"] {
+  stroke: #334155 !important;
+}
+
+.app-theme-dark .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #172337 !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .app-main-content {
+    padding: 0.5rem;
+  }
+
+  [role="dialog"] {
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  table {
+    font-size: 0.75rem;
+  }
+
+  .rv-up nav[aria-label],
+  [role="tablist"] {
+    overflow-x: auto;
+  }
+}

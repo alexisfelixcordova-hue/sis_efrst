@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import { Bell, Check } from "lucide-react";
-import axios from "axios";
-
-const API_URL = "http://localhost:8000/api";
+import api from "../../../../api/axios.js";
 const STORAGE_KEY = "preferencias_notificaciones";
 
 const iniciales = [
@@ -11,7 +9,20 @@ const iniciales = [
   { id: "constancias", titulo: "Solicitudes de constancias", texto: "Avisar de nuevas solicitudes pendientes", activo: true },
   { id: "revisiones", titulo: "Revisiones pendientes", texto: "Recordatorio de expedientes por revisar", activo: false },
   { id: "sistema", titulo: "Avisos del sistema", texto: "Mantenimiento y novedades de la plataforma", activo: false },
+  { id: "asignaciones", titulo: "Nuevas asignaciones", texto: "Avisar cuando se asignen alumnos a tu cuenta", activo: true },
 ];
+
+const leerPreferenciasLocales = () => {
+  try {
+    const guardadas = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    return iniciales.map((item) => ({
+      ...item,
+      activo: guardadas[item.id] ?? item.activo,
+    }));
+  } catch {
+    return iniciales;
+  }
+};
 
 function Switch({ activo, onChange, label, disabled }) {
   return (
@@ -36,41 +47,39 @@ function Switch({ activo, onChange, label, disabled }) {
 }
 
 export default function Notificaciones({ darkMode = false }) {
-  const [items, setItems] = useState(() => {
-    const guardadas = localStorage.getItem(STORAGE_KEY);
-    if (guardadas) {
-      const mapa = JSON.parse(guardadas);
-      return iniciales.map((n) => ({ ...n, activo: mapa[n.id] ?? n.activo }));
-    }
-    return iniciales;
-  });
+  const [items, setItems] = useState(leerPreferenciasLocales);
 
   const [guardando, setGuardando] = useState(false);
   const [mensajeGuardado, setMensajeGuardado] = useState(false);
-  const tokenSesion = localStorage.getItem("token") || localStorage.getItem("access_token");
+  const [errorPreferencias, setErrorPreferencias] = useState("");
+  const tokenSesion =
+    localStorage.getItem("token") ||
+    localStorage.getItem("access_token") ||
+    sessionStorage.getItem("token") ||
+    sessionStorage.getItem("access_token");
 
   // Cargar preferencias reales desde PostgreSQL al montar
   useEffect(() => {
     const cargarPreferencias = async () => {
       if (!tokenSesion) return;
       try {
-        const res = await axios.get(`${API_URL}/notificaciones/preferencias`, {
-          headers: { Authorization: `Bearer ${tokenSesion}`, Accept: "application/json" },
-        });
+        const res = await api.get("/notificaciones/preferencias");
         if (res.data && typeof res.data === "object") {
           setItems((prev) =>
             prev.map((n) => ({ ...n, activo: res.data[n.id] ?? n.activo }))
           );
           localStorage.setItem(STORAGE_KEY, JSON.stringify(res.data));
         }
-      } catch {
-        // Si aún no hay registro en BD, mantiene las iniciales o las de localStorage
+      } catch (error) {
+        console.error("No se pudieron cargar las preferencias de notificaciones:", error);
+        setErrorPreferencias("No se pudieron sincronizar tus preferencias con el servidor.");
       }
     };
     cargarPreferencias();
   }, [tokenSesion]);
 
   const alternar = async (id) => {
+    const anteriores = items;
     const nuevosItems = items.map((n) =>
       n.id === id ? { ...n, activo: !n.activo } : n
     );
@@ -91,16 +100,23 @@ export default function Notificaciones({ darkMode = false }) {
     // Guardar en la base de datos (Laravel)
     if (!tokenSesion) return;
     setGuardando(true);
+    setErrorPreferencias("");
     try {
-      await axios.post(
-        `${API_URL}/notificaciones/preferencias`,
-        { preferencias: mapaPreferencias },
-        { headers: { Authorization: `Bearer ${tokenSesion}`, Accept: "application/json" } }
-      );
+      await api.post("/notificaciones/preferencias", { preferencias: mapaPreferencias });
       setMensajeGuardado(true);
       setTimeout(() => setMensajeGuardado(false), 2000);
     } catch (error) {
       console.error("Error al guardar preferencias:", error);
+      setItems(anteriores);
+      const preferenciasAnteriores = anteriores.reduce((acc, item) => {
+        acc[item.id] = item.activo;
+        return acc;
+      }, {});
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(preferenciasAnteriores));
+      window.dispatchEvent(
+        new CustomEvent("preferencias_notif_cambiadas", { detail: preferenciasAnteriores })
+      );
+      setErrorPreferencias("No se guardaron los cambios. Inténtalo de nuevo.");
     } finally {
       setGuardando(false);
     }
@@ -133,6 +149,12 @@ export default function Notificaciones({ darkMode = false }) {
           </span>
         )}
       </div>
+
+      {errorPreferencias && (
+        <p role="alert" className="mt-4 text-xs font-medium text-rose-500">
+          {errorPreferencias}
+        </p>
+      )}
 
       <ul className={`mt-6 divide-y ${darkMode ? "divide-slate-800" : "divide-gray-100"}`}>
         {items.map((n) => (

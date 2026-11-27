@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Search,
   UserRound,
-  GraduationCap,
   Clock3,
   CheckCircle2,
   CircleAlert,
@@ -14,15 +13,17 @@ import {
 } from "lucide-react";
 
 import api, { getCachedData } from "../../../api/axios";
+import {
+  normalizarNombreModulo,
+  useModuloSistema,
+} from "../../../utils/moduloSistema";
 
-export const LS_REVISION_ESTUDIANTES = "docente_calificar_estudiantes_v5";
+export const LS_REVISION_ESTUDIANTES = "docente_calificar_estudiantes_v6";
 
 export const CACHE_REVISION_MEM = {
   clave: "",
   estudiantes: null,
 };
-
-const ROMANOS = ["I", "II", "III"];
 
 export const obtenerTokenRevision = () =>
   localStorage.getItem("access_token") ||
@@ -156,7 +157,8 @@ const construirModulosEstudiante = (item, estudiante, idEstudiante) => {
 
   fuenteModulos.forEach((m, idx) => {
     const num = detectarNumeroMod(m, idx + 1);
-    const idModulo = m?.id_modulo ?? m?.modulo_id ?? m?.id ?? num;
+    const idModulo = m?.id_modulo ?? m?.modulo_id ?? m?.id ?? null;
+    if (idModulo === null || idModulo === undefined || idModulo === "") return;
     const idExpediente = m?.id_expediente ?? m?.expediente_id ?? null;
     const expLocal = leerExpedienteLocalModulo(idEstudiante, idModulo, num);
 
@@ -206,12 +208,13 @@ const construirModulosEstudiante = (item, estudiante, idEstudiante) => {
       id_modulo: idModulo,
       numero_modulo: num,
       id_expediente: idExpediente ?? expLocal?.id_expediente ?? null,
-      nombre_modulo:
+      nombre_modulo: normalizarNombreModulo(
         m?.nombre_modulo ||
-        m?.modulo_nombre ||
-        m?.modulo ||
-        expLocal?.nombre_modulo ||
-        `Módulo ${ROMANOS[num - 1]}`,
+          m?.modulo_nombre ||
+          m?.modulo ||
+          expLocal?.nombre_modulo ||
+          "Nombre de módulo no disponible"
+      ),
       docente_asignado: docenteAsignado,
       id_docente_asesor: idDocenteAsignado,
       empresa:
@@ -257,6 +260,12 @@ const construirModulosEstudiante = (item, estudiante, idEstudiante) => {
     });
   });
 
+  const tieneModuloPrincipal = [
+    item?.id_modulo,
+    item?.modulo_id,
+    estudiante?.id_modulo,
+  ].some((valor) => valor !== null && valor !== undefined && valor !== "");
+
   const numPrincipal = detectarNumeroMod(
     {
       numero_modulo: item?.numero_modulo ?? estudiante?.numero_modulo,
@@ -270,8 +279,8 @@ const construirModulosEstudiante = (item, estudiante, idEstudiante) => {
     1
   );
 
-  if (!mapaPorNum.has(numPrincipal)) {
-    const idModPrin = item?.id_modulo ?? estudiante?.id_modulo ?? numPrincipal;
+  if (tieneModuloPrincipal && !mapaPorNum.has(numPrincipal)) {
+    const idModPrin = item?.id_modulo ?? item?.modulo_id ?? estudiante?.id_modulo;
     const expLocalPrin = leerExpedienteLocalModulo(
       idEstudiante,
       idModPrin,
@@ -297,13 +306,14 @@ const construirModulosEstudiante = (item, estudiante, idEstudiante) => {
         estudiante?.id_expediente ??
         expLocalPrin?.id_expediente ??
         null,
-      nombre_modulo:
+      nombre_modulo: normalizarNombreModulo(
         item?.modulo_nombre ||
         item?.nombre_modulo ||
         item?.modulo ||
         estudiante?.modulo_nombre ||
         expLocalPrin?.nombre_modulo ||
-        `Módulo ${ROMANOS[numPrincipal - 1]}`,
+        "Nombre de módulo no disponible"
+      ),
       docente_asignado: formatearNombrePersona(
         docObj,
         item?.docente_nombre ||
@@ -375,46 +385,9 @@ const construirModulosEstudiante = (item, estudiante, idEstudiante) => {
     });
   }
 
-  return [1, 2, 3].map((num) => {
-    const existente = mapaPorNum.get(num);
-    if (existente) return existente;
-    const expLocal = leerExpedienteLocalModulo(idEstudiante, num, num);
-    return {
-      id_modulo: num,
-      numero_modulo: num,
-      id_expediente: expLocal?.id_expediente ?? null,
-      nombre_modulo: expLocal?.nombre_modulo || `Módulo ${ROMANOS[num - 1]}`,
-      docente_asignado:
-        expLocal?.docente_responsable ||
-        expLocal?.docente_asignado ||
-        "Sin docente asignado",
-      id_docente_asesor: expLocal?.id_docente_asesor ?? null,
-      empresa:
-        expLocal?.empresa_nombre ||
-        expLocal?.empresa_institucion ||
-        item?.empresa?.razon_social ||
-        item?.empresa_razon_social ||
-        item?.empresa_nombre ||
-        estudiante?.empresa_razon_social ||
-        estudiante?.empresa_nombre ||
-        estudiante?.empresa ||
-        "Empresa no registrada",
-      horas_acumuladas: Number(expLocal?.horas_acumuladas ?? 0),
-      horas_requeridas: Number(expLocal?.horas_requeridas ?? 160),
-      estado_portafolio:
-        expLocal?.estado_portafolio || "Pendiente de revisión",
-      verificado_docente: Boolean(expLocal?.verificado_docente ?? false),
-      listo_para_constancia: Boolean(
-        expLocal?.listo_para_constancia ?? false
-      ),
-      nota:
-        expLocal?.nota !== undefined && expLocal?.nota !== null
-          ? Number(expLocal.nota)
-          : null,
-      comentario: expLocal?.comentario || expLocal?.observacion || "",
-      adjuntado: Boolean(expLocal?.adjuntar_expediente ?? false),
-    };
-  });
+  return [...mapaPorNum.values()].sort(
+    (a, b) => Number(a.numero_modulo) - Number(b.numero_modulo)
+  );
 };
 
 export const normalizarAlumnoRevision = (item, index) => {
@@ -451,7 +424,7 @@ export const normalizarAlumnoRevision = (item, index) => {
     estudiante.nombre ||
     `Estudiante ${index + 1}`;
 
-  const foto =
+  const fotoCruda =
     estudiante.foto_url ||
     estudiante.fotografia ||
     estudiante.foto ||
@@ -459,6 +432,10 @@ export const normalizarAlumnoRevision = (item, index) => {
     estudiante.avatar ||
     estudiante.foto_perfil ||
     "";
+  const foto =
+    fotoCruda && !/^(https?:|data:|blob:)/i.test(fotoCruda)
+      ? `${String(api.defaults.baseURL || "").replace(/\/api\/?$/, "")}/${String(fotoCruda).replace(/^\/+/, "")}`
+      : fotoCruda;
 
   const notaBase =
     item.nota !== undefined && item.nota !== null
@@ -470,9 +447,9 @@ export const normalizarAlumnoRevision = (item, index) => {
   return {
     id: `${idEstudiante}`,
     estudianteId: idEstudiante,
-    moduloId: modActivo.id_modulo,
-    numeroModuloInicial: modActivo.numero_modulo,
-    idExpediente: modActivo.id_expediente,
+    moduloId: modActivo?.id_modulo ?? null,
+    numeroModuloInicial: modActivo?.numero_modulo ?? null,
+    idExpediente: modActivo?.id_expediente ?? null,
     modulos,
     nombre: String(nombre).trim(),
     dni: String(
@@ -485,12 +462,12 @@ export const normalizarAlumnoRevision = (item, index) => {
       estudiante.carrera ||
       estudiante.programa_estudios ||
       "Programa de estudios",
-    modulo: modActivo.nombre_modulo,
-    docenteAsignado: modActivo.docente_asignado,
-    empresa: modActivo.empresa,
-    horasAcumuladas: modActivo.horas_acumuladas,
-    horasRequeridas: modActivo.horas_requeridas,
-    estadoPortafolio: modActivo.estado_portafolio,
+    modulo: modActivo?.nombre_modulo || "Sin módulo asignado",
+    docenteAsignado: modActivo?.docente_asignado || "Docente no asignado",
+    empresa: modActivo?.empresa || "Empresa no registrada",
+    horasAcumuladas: modActivo?.horas_acumuladas ?? 0,
+    horasRequeridas: modActivo?.horas_requeridas ?? 160,
+    estadoPortafolio: modActivo?.estado_portafolio || "Pendiente de revisión",
     foto,
     expediente:
       item.codigo_expediente ||
@@ -498,15 +475,64 @@ export const normalizarAlumnoRevision = (item, index) => {
       item.codigo ||
       `EXP-${String(index + 1).padStart(3, "0")}`,
     nota: notaBase !== null && !Number.isNaN(notaBase) ? notaBase : null,
-    comentario: item.comentario || item.observacion || modActivo.comentario || "",
+    comentario: item.comentario || item.observacion || modActivo?.comentario || "",
     adjuntado: Boolean(
       item.adjuntado_expediente ||
         item.calificado ||
         item.finalizado ||
         ["CALIFICADO", "APROBADO", "CERRADO", "COMPLETADO"].includes(estado) ||
-        modActivo.adjuntado
+        modActivo?.adjuntado
     ),
   };
+};
+
+export const agruparAlumnosRevision = (estudiantes = []) => {
+  const agrupados = new Map();
+  estudiantes.forEach((estudiante) => {
+    const clave = String(estudiante.estudianteId ?? estudiante.id);
+    const anterior = agrupados.get(clave);
+    if (!anterior) {
+      agrupados.set(clave, { ...estudiante, modulos: [...estudiante.modulos] });
+      return;
+    }
+
+    const modulos = [...anterior.modulos];
+    estudiante.modulos.forEach((modulo) => {
+      if (
+        !modulos.some(
+          (existente) =>
+            String(existente.id_modulo) === String(modulo.id_modulo)
+        )
+      ) {
+        modulos.push(modulo);
+      }
+    });
+    agrupados.set(clave, { ...anterior, ...estudiante, modulos });
+  });
+
+  return [...agrupados.values()].map((estudiante) => {
+    const modulos = [...estudiante.modulos].sort(
+      (a, b) => Number(a.numero_modulo) - Number(b.numero_modulo)
+    );
+    const moduloInicial = modulos[0];
+    return {
+      ...estudiante,
+      modulos,
+      moduloId: moduloInicial?.id_modulo ?? null,
+      numeroModuloInicial: moduloInicial?.numero_modulo ?? null,
+      idExpediente: moduloInicial?.id_expediente ?? null,
+      modulo: moduloInicial?.nombre_modulo || "Sin módulo asignado",
+      docenteAsignado: moduloInicial?.docente_asignado || "Docente no asignado",
+      empresa: moduloInicial?.empresa || "Empresa no registrada",
+      horasAcumuladas: moduloInicial?.horas_acumuladas ?? 0,
+      horasRequeridas: moduloInicial?.horas_requeridas ?? 160,
+      estadoPortafolio:
+        moduloInicial?.estado_portafolio || "Pendiente de revisión",
+      nota: moduloInicial?.nota ?? null,
+      comentario: moduloInicial?.comentario || "",
+      adjuntado: Boolean(moduloInicial?.adjuntado),
+    };
+  });
 };
 
 export const inicialesRevision = (nombre = "") =>
@@ -576,6 +602,7 @@ export default function ListaEstudiantesRevision({
   avisoExterno = null,
 }) {
   const claveSesion = useMemo(() => obtenerClaveSesionRevision(), []);
+  const moduloSistema = useModuloSistema();
 
   const [cargando, setCargando] = useState(
     () => !Array.isArray(estudiantes) || estudiantes.length === 0
@@ -599,6 +626,37 @@ export default function ListaEstudiantesRevision({
     window.setTimeout(() => setAvisoLocal(null), 4000);
   };
 
+  const estudiantesPorModulo = useMemo(() => {
+    const base = Array.isArray(estudiantes) ? estudiantes : [];
+    if (!moduloSistema?.id_modulo) return base;
+
+    return base.flatMap((estudiante) => {
+      const modulo = estudiante.modulos.find(
+        (item) =>
+          String(item.id_modulo) === String(moduloSistema.id_modulo)
+      );
+      if (!modulo) return [];
+
+      return [
+        {
+          ...estudiante,
+          moduloId: modulo.id_modulo,
+          numeroModuloInicial: modulo.numero_modulo,
+          idExpediente: modulo.id_expediente,
+          modulo: modulo.nombre_modulo,
+          docenteAsignado: modulo.docente_asignado,
+          empresa: modulo.empresa,
+          horasAcumuladas: modulo.horas_acumuladas,
+          horasRequeridas: modulo.horas_requeridas,
+          estadoPortafolio: modulo.estado_portafolio,
+          nota: modulo.nota,
+          comentario: modulo.comentario,
+          adjuntado: Boolean(modulo.adjuntado),
+        },
+      ];
+    });
+  }, [estudiantes, moduloSistema]);
+
   const cargarEstudiantes = useCallback(
     async ({ forzarSpinner = false } = {}) => {
       const claveActual = obtenerClaveSesionRevision();
@@ -621,14 +679,23 @@ export default function ListaEstudiantesRevision({
           headers: obtenerHeadersRevision(),
         });
 
-        const lista = extraerListaRevision(respuesta?.data).map(
-          normalizarAlumnoRevision
+        const filas = extraerListaRevision(respuesta?.data);
+        const normalizados = filas.map(normalizarAlumnoRevision);
+        const validos = normalizados.filter(
+          (estudiante) => estudiante.modulos.length > 0
         );
+        const lista = agruparAlumnosRevision(validos);
 
         CACHE_REVISION_MEM.clave = claveActual;
         CACHE_REVISION_MEM.estudiantes = lista;
         setEstudiantes(lista);
         guardarStorageRevision(sKey, lista);
+        if (validos.length < normalizados.length) {
+          mostrarAviso(
+            "error",
+            "Hay asignaciones sin módulo asociado. No se pueden calificar hasta corregirlas."
+          );
+        }
       } catch (error) {
         console.error("Error al cargar estudiantes:", error);
         const guardados = leerStorageRevision(sKey, []);
@@ -649,8 +716,10 @@ export default function ListaEstudiantesRevision({
   useEffect(() => {
     const cache = getCachedData("/mis-alumnos", {});
     if (cache) {
-      const lista = extraerListaRevision(cache).map(
-        normalizarAlumnoRevision
+      const lista = agruparAlumnosRevision(
+        extraerListaRevision(cache)
+          .map(normalizarAlumnoRevision)
+          .filter((estudiante) => estudiante.modulos.length > 0)
       );
       CACHE_REVISION_MEM.clave = claveSesion;
       CACHE_REVISION_MEM.estudiantes = lista;
@@ -664,14 +733,20 @@ export default function ListaEstudiantesRevision({
 
   const estudiantesFiltrados = useMemo(() => {
     const texto = busqueda.toLowerCase().trim();
-    const base = Array.isArray(estudiantes) ? estudiantes : [];
 
-    return base.filter((estudiante) => {
+    return estudiantesPorModulo.filter((estudiante) => {
+      const moduloActivo =
+        estudiante.modulos.find(
+          (modulo) =>
+            String(modulo.id_modulo) === String(moduloSistema?.id_modulo)
+        ) || estudiante.modulos[0];
       const coincideTexto =
         !texto ||
         estudiante.nombre.toLowerCase().includes(texto) ||
         estudiante.dni.toLowerCase().includes(texto) ||
-        estudiante.modulo.toLowerCase().includes(texto) ||
+        (moduloActivo?.nombre_modulo || estudiante.modulo)
+          .toLowerCase()
+          .includes(texto) ||
         estudiante.empresa.toLowerCase().includes(texto) ||
         estudiante.docenteAsignado.toLowerCase().includes(texto) ||
         estudiante.expediente.toLowerCase().includes(texto);
@@ -681,20 +756,22 @@ export default function ListaEstudiantesRevision({
         (filtro === "Pendientes" && !estudiante.adjuntado) ||
         (filtro === "Calificados" && estudiante.adjuntado);
 
-      return coincideTexto && coincideFiltro;
+      const coincideModulo =
+        !moduloSistema?.id_modulo ||
+        estudiante.modulos.some(
+          (modulo) =>
+            String(modulo.id_modulo) === String(moduloSistema.id_modulo)
+        );
+
+      return coincideTexto && coincideFiltro && coincideModulo;
     });
-  }, [estudiantes, busqueda, filtro]);
+  }, [estudiantesPorModulo, busqueda, filtro, moduloSistema]);
 
   return (
-    <div className={`min-h-full w-full ${fondo} p-3 sm:p-5`}>
-      <div className="mx-auto w-full max-w-[1500px] space-y-5">
+    <div className={`min-h-full w-full ${fondo}`}>
+      <div className="w-full space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-blue-600">
-              <GraduationCap size={16} />
-              GESTIÓN DOCENTE / EFSRT
-            </div>
-
             <h1 className="text-2xl font-extrabold tracking-tight">
               Estudiantes a revisión
             </h1>
@@ -702,6 +779,11 @@ export default function ListaEstudiantesRevision({
             <p className={`mt-1 text-sm ${muted}`}>
               Selecciona un estudiante para revisar sus módulos, centro de prácticas, horas, portafolio y calificarlo en su expediente.
             </p>
+            {moduloSistema?.nombre_modulo && (
+              <p className="mt-1 text-xs font-semibold text-blue-600">
+                Módulo activo: {moduloSistema.nombre_modulo}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -750,19 +832,19 @@ export default function ListaEstudiantesRevision({
           {[
             {
               label: "Estudiantes a revisión",
-              valor: estudiantes.length,
+              valor: estudiantesPorModulo.length,
               icono: UserRound,
               color: "blue",
             },
             {
               label: "Evaluaciones pendientes",
-              valor: estudiantes.filter((e) => !e.adjuntado).length,
+              valor: estudiantesPorModulo.filter((e) => !e.adjuntado).length,
               icono: Clock3,
               color: "amber",
             },
             {
               label: "Evaluaciones registradas",
-              valor: estudiantes.filter((e) => e.adjuntado).length,
+              valor: estudiantesPorModulo.filter((e) => e.adjuntado).length,
               icono: CheckCircle2,
               color: "emerald",
             },
@@ -857,13 +939,20 @@ export default function ListaEstudiantesRevision({
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-              {estudiantesFiltrados.map((estudiante) => (
-                <button
-                  key={estudiante.id}
-                  type="button"
-                  onClick={() => onSeleccionarEstudiante(estudiante)}
-                  className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-900/5"
-                >
+              {estudiantesFiltrados.map((estudiante) => {
+                const moduloVisible =
+                  estudiante.modulos.find(
+                    (modulo) =>
+                      String(modulo.id_modulo) ===
+                      String(moduloSistema?.id_modulo)
+                  ) || estudiante.modulos[0];
+                return (
+                  <button
+                    key={estudiante.id}
+                    type="button"
+                    onClick={() => onSeleccionarEstudiante(estudiante)}
+                    className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-900/5"
+                  >
                   <div className="flex items-start gap-3">
                     <AvatarRevision estudiante={estudiante} />
 
@@ -876,7 +965,7 @@ export default function ListaEstudiantesRevision({
                       </p>
                       <p className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500">
                         <BookOpen size={12} className="shrink-0 text-blue-600" />
-                        {estudiante.modulo}
+                        {moduloVisible?.nombre_modulo || estudiante.modulo}
                       </p>
                       <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-500">
                         <Building2 size={12} className="shrink-0 text-indigo-600" />
@@ -884,7 +973,7 @@ export default function ListaEstudiantesRevision({
                       </p>
                       <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-400">
                         <UserCheck size={12} className="shrink-0 text-emerald-600" />
-                        Docente: {estudiante.docenteAsignado}
+                        Docente: {moduloVisible?.docente_asignado || estudiante.docenteAsignado}
                       </p>
                     </div>
 
@@ -905,7 +994,10 @@ export default function ListaEstudiantesRevision({
                         }`}
                         title={`${m.nombre_modulo} · Empresa: ${m.empresa} · Docente: ${m.docente_asignado}`}
                       >
-                        M{ROMANOS[m.numero_modulo - 1]}: {m.adjuntado ? "Calificado" : "Pendiente"}
+                        <span className="inline-block max-w-[220px] truncate align-bottom">
+                          {m.nombre_modulo}
+                        </span>
+                        : {m.adjuntado ? "Calificado" : "Pendiente"}
                       </span>
                     ))}
                   </div>
@@ -916,12 +1008,13 @@ export default function ListaEstudiantesRevision({
                     </span>
                     <EstadoEtiquetaRevision
                       estado={
-                        estudiante.adjuntado ? "Completado" : "Pendiente"
+                        moduloVisible?.adjuntado ? "Completado" : "Pendiente"
                       }
                     />
                   </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>

@@ -3,7 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer, ReferenceLine, Tooltip,
 } from 'recharts'
-import api, { getCachedData, clearApiCache } from '../../api/axios'
+import api, { getCachedData, invalidateApiCache } from '../../api/axios'
 
 /* ---------- Iconos ---------- */
 const Icon = ({ d, className = 'w-3.5 h-3.5' }) => (
@@ -33,7 +33,7 @@ const estadoStyle = {
 
 /* ---------- Persistencia en localStorage (sin recargas entre secciones) ---------- */
 const LS_KEYS = {
-  resumen: 'dashboard_efsrt_resumen_v1',
+  resumen: 'dashboard_efsrt_resumen_v2',
   docentes: 'dashboard_efsrt_docentes_v1',
   expedientes: 'dashboard_efsrt_expedientes_v1',
   alumnos: 'dashboard_efsrt_alumnos_v1',
@@ -55,6 +55,14 @@ const guardarLocal = (key, value) => {
   } catch {
     /* ignorar cuota o restricciones de almacenamiento */
   }
+}
+
+const urlFotoPublica = (valor) => {
+  const foto = String(valor || '').trim()
+  if (!foto) return ''
+  if (/^(https?:|data:|blob:)/i.test(foto)) return foto
+  const origen = String(api.defaults.baseURL || '').replace(/\/api\/?$/, '')
+  return `${origen}/${foto.replace(/^\/+/, '')}`
 }
 
 const limpiarLocalDashboard = () => {
@@ -205,9 +213,10 @@ const normalizarDocente = (d = {}) => {
     'Asesor EFSRT'
   const estado = d.status || d.estado || (d.activo === false ? 'En Revisión' : 'Activo')
   const rawImg = d.img || d.foto_url || d.foto || d.avatar || ''
+  const foto = urlFotoPublica(rawImg)
   const img =
-    rawImg && !String(rawImg).includes('pravatar')
-      ? rawImg
+    foto && !foto.includes('pravatar')
+      ? foto
       : `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=e8f0ff&color=2f6bff`
 
   return {
@@ -225,6 +234,7 @@ const normalizarExpediente = (r = {}, idx = 0) => {
   const nombreEst =
     r.est ||
     r.estudiante_nombre ||
+    r.nombre ||
     (typeof estObj === 'string' ? estObj : '') ||
     (estObj
       ? estObj.name || estObj.nombre || [estObj.nombres, estObj.apellidos].filter(Boolean).join(' ')
@@ -240,11 +250,11 @@ const normalizarExpediente = (r = {}, idx = 0) => {
         : `${horasNum} hrs`
       : '-')
 
-  const fechaRaw = r.fecha || r.fecha_registro || r.fecha_inicio || r.created_at || ''
+  const fechaRaw = r.fecha || r.fecha_emision || r.fecha_registro || r.fecha_inicio || r.created_at || ''
   const fecha = fechaRaw ? String(fechaRaw).slice(0, 10) : '-'
 
   return {
-    id: r.id ?? r.codigo ?? r.numero_expediente ?? `EXP-${idx + 1}`,
+    id: r.id ?? r.id_expediente ?? r.codigo ?? r.numero_expediente ?? `EXP-${idx + 1}`,
     fecha,
     est: nombreEst,
     hrs,
@@ -263,9 +273,10 @@ const normalizarAlumno = (a = {}, idx = 0) => {
   const tag = String(a.tag || a.rol || a.tipo || a.estado || 'ALUMNO').toUpperCase()
   const color = tag.includes('DOC') ? 'text-[#f59e0b]' : 'text-[#16a34a]'
   const rawImg = a.img || a.foto_url || a.foto || a.avatar || ''
+  const foto = urlFotoPublica(rawImg)
   const img =
-    rawImg && !String(rawImg).includes('pravatar')
-      ? rawImg
+    foto && !foto.includes('pravatar')
+      ? foto
       : `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=e6f7ee&color=16a34a`
 
   return {
@@ -345,7 +356,7 @@ const RESUMEN_BASE = {
 }
 
 /* ---------- Vista ---------- */
-export default function Dashboard({ setVista, setEstudiante }) {
+export default function Dashboard({ setVista, setEstudiante, darkMode }) {
   const [rolUsuario, setRolUsuario] = useState(() => obtenerRolActual())
   const [periodoModulo, setPeriodoModulo] = useState('Sem')
   const [buscarTutor, setBuscarTutor] = useState('')
@@ -361,7 +372,7 @@ export default function Dashboard({ setVista, setEstudiante }) {
   const [guardando, setGuardando] = useState(false)
 
   const [resumen, setResumen] = useState(() => {
-    const cached = getCachedData('/reportes/estadisticas', { periodo: 'Sem' }) || leerLocal(LS_KEYS.resumen)
+    const cached = getCachedData('/dashboard/resumen', { periodo: 'Sem' }) || leerLocal(LS_KEYS.resumen)
     return desempaquetarObjeto(cached, RESUMEN_BASE)
   })
 
@@ -371,7 +382,7 @@ export default function Dashboard({ setVista, setEstudiante }) {
   })
 
   const [expedientes, setExpedientes] = useState(() => {
-    const cached = getCachedData('/expedientes', { all: true }) || leerLocal(LS_KEYS.expedientes)
+    const cached = getCachedData('/constancias-efsrt') || leerLocal(LS_KEYS.expedientes)
     return cached ? extraerLista(cached).map(normalizarExpediente) : []
   })
 
@@ -389,13 +400,13 @@ export default function Dashboard({ setVista, setEstudiante }) {
 
     setRolUsuario(obtenerRolActual())
 
-    const cachedRes = getCachedData('/reportes/estadisticas', { periodo: periodoModulo })
+    const cachedRes = getCachedData('/dashboard/resumen', { periodo: periodoModulo })
     if (cachedRes) setResumen((prev) => desempaquetarObjeto(cachedRes, prev))
 
     const cachedDoc = getCachedData('/docentes', { all: true })
     if (cachedDoc) setDocentes(extraerLista(cachedDoc).map(normalizarDocente))
 
-    const cachedExp = getCachedData('/expedientes', { all: true })
+    const cachedExp = getCachedData('/constancias-efsrt')
     if (cachedExp) setExpedientes(extraerLista(cachedExp).map(normalizarExpediente))
 
     const cachedAlu = getCachedData('/estudiantes', { all: true })
@@ -403,11 +414,11 @@ export default function Dashboard({ setVista, setEstudiante }) {
 
     async function cargarTodo() {
       const [resEst, resDoc, resExp, resAlu, resPerfil] = await Promise.allSettled([
-        api.get('/reportes/estadisticas', { params: { periodo: periodoModulo } }),
+        api.get('/dashboard/resumen', { params: { periodo: periodoModulo } }),
         api.get('/docentes', { params: { all: true } }),
-        api.get('/expedientes', { params: { all: true } }),
+        api.get('/constancias-efsrt'),
         api.get('/estudiantes', { params: { all: true } }),
-        api.get('/auth/me').catch(() => api.get('/user').catch(() => api.get('/perfil'))),
+        api.get('/perfil'),
       ])
 
       if (!activo) return
@@ -585,7 +596,7 @@ export default function Dashboard({ setVista, setEstudiante }) {
     try {
       setGuardando(true)
       await api.post('/asignaciones-asesores', formAsignar)
-      clearApiCache()
+      invalidateApiCache('/asignaciones-asesores')
       limpiarLocalDashboard()
       setModalAsignar(false)
       setFormAsignar({ docente: '', modulo: 'Asesor Módulo I' })
@@ -609,16 +620,17 @@ export default function Dashboard({ setVista, setEstudiante }) {
 
   return (
     <div
-      className="min-h-screen bg-[#f4f6fa] p-6 text-[#111827]"
+      className="dashboard-admin min-h-full w-full bg-[#f4f6fa] text-[#111827]"
+      data-theme={darkMode ? "dark" : "light"}
       style={{ fontFamily: "'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif" }}
     >
-      <div className="max-w-[3/4] mx-auto space-y-4">
+      <div className="mx-auto w-full max-w-[1500px] min-w-0 space-y-5">
 
         {/* Encabezado */}
-        <div className="flex items-start justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-[22px] font-extrabold leading-tight">Buenos Días, {rolUsuario}.</h1>
-            <p className="text-[11px] text-[#8b92a5] mt-1">
+            <h1 className="text-2xl font-extrabold leading-tight tracking-tight">Buenos Días, {rolUsuario}.</h1>
+            <p className="mt-1 text-sm text-[#8b92a5]">
               Gestión y control de prácticas preprofesionales EFSRT
             </p>
           </div>
@@ -630,9 +642,9 @@ export default function Dashboard({ setVista, setEstudiante }) {
         </div>
 
         {/* Fila 1: métricas */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
           <Card>
-            <div className="flex items-center justify-between text-[11px] text-[#6b7280]">
+            <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-[#6b7280]">
               Alumnos Registrados <Badge>{resumen.varAlumnos}</Badge>
             </div>
             <div className="flex items-end justify-between mt-2">
@@ -707,16 +719,16 @@ export default function Dashboard({ setVista, setEstudiante }) {
         </div>
 
         {/* Fila 2: docentes completos + revisiones semanales */}
-        <div className="grid grid-cols-[1.05fr_1fr] gap-4">
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[1.05fr_1fr] sm:gap-4">
           <Card>
-            <div className="flex items-start justify-between">
+            <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h3 className="text-[13px] font-bold">Docentes y Asesores</h3>
                 <p className="text-[10px] text-[#8b92a5] mt-0.5 max-w-[150px] leading-snug">
                   Asignación y seguimiento de tutores de prácticas
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <SearchBox
                   placeholder="Buscar tutor..."
                   w="w-36"
@@ -733,9 +745,9 @@ export default function Dashboard({ setVista, setEstudiante }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-4 max-h-[260px] overflow-y-auto pr-1">
+            <div className="mt-4 grid max-h-[260px] grid-cols-1 gap-x-4 gap-y-3 overflow-y-auto pr-1 sm:grid-cols-2">
               {docentesFiltrados.length === 0 ? (
-                <div className="col-span-2 text-[10px] text-[#8b92a5] py-6 text-center">
+                <div className="col-span-full py-6 text-center text-[10px] text-[#8b92a5]">
                   No hay docentes registrados o no coinciden con la búsqueda.
                 </div>
               ) : (
@@ -800,7 +812,7 @@ export default function Dashboard({ setVista, setEstudiante }) {
         </div>
 
         {/* Fila 3: módulos + tabla */}
-        <div className="grid grid-cols-[1fr_1.05fr] gap-4">
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[1fr_1.05fr] sm:gap-4">
           <Card>
             <div className="flex items-start justify-between">
               <div>
@@ -841,7 +853,7 @@ export default function Dashboard({ setVista, setEstudiante }) {
               <span className="flex items-center gap-1"><i className="w-1.5 h-1.5 rounded-full bg-[#1f2937]" />Horas Registradas</span>
               <span className="flex items-center gap-1"><i className="w-1.5 h-1.5 rounded-full bg-[#2f6bff]" />Proyectos Activos</span>
             </div>
-            <div className="grid grid-cols-4 border-t border-[#eceef3] mt-3 pt-3 text-center">
+            <div className="mt-3 grid grid-cols-2 border-t border-[#eceef3] pt-3 text-center sm:grid-cols-4">
               {totalesModulosData.map((item, idx) => {
                 const v = Array.isArray(item) ? item[0] : item?.valor ?? 0
                 const l = Array.isArray(item) ? item[1] : item?.etiqueta ?? ''
@@ -856,11 +868,11 @@ export default function Dashboard({ setVista, setEstudiante }) {
           </Card>
 
           <Card>
-            <div className="flex items-start justify-between">
+            <div className="flex flex-wrap items-start justify-between gap-2">
               <h3 className="text-[13px] font-bold max-w-[110px] leading-snug">
                 Últimas Actualizaciones de Prácticas
               </h3>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <SearchBox
                   placeholder="Buscar ID..."
                   w="w-28"
@@ -879,7 +891,8 @@ export default function Dashboard({ setVista, setEstudiante }) {
               </div>
             </div>
 
-            <table className="w-full mt-3 text-left">
+            <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-left">
               <thead>
                 <tr className="text-[8px] uppercase tracking-wide text-[#8b92a5] bg-[#f7f8fb]">
                   {['ID Expediente', 'Fecha', 'Estudiante', 'Horas EFSRT', 'Estado', 'Acción'].map((h) => (
@@ -916,6 +929,7 @@ export default function Dashboard({ setVista, setEstudiante }) {
                 )}
               </tbody>
             </table>
+            </div>
 
             <div className="flex items-center justify-between mt-3 text-[9px] text-[#8b92a5]">
               <span>Mostrando {listaExpedientes.length} de {totalExpedientes} expedientes</span>
@@ -939,11 +953,11 @@ export default function Dashboard({ setVista, setEstudiante }) {
 
         {/* Fila 4: todos los alumnos reales */}
         <Card>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-[13px] font-bold">
               Alumnos Registrados ({alumnosFiltrados.length})
             </h3>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <GhostBtn icon={<SortIcon />} onClick={() => setOrdenAlumnoAsc((v) => !v)}>
                 Ordenar
               </GhostBtn>
@@ -952,9 +966,9 @@ export default function Dashboard({ setVista, setEstudiante }) {
               </GhostBtn>
             </div>
           </div>
-          <div className="grid grid-cols-5 gap-4 mt-3 max-h-[420px] overflow-y-auto pr-1">
+          <div className="mt-3 grid max-h-[420px] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
             {alumnosFiltrados.length === 0 ? (
-              <div className="col-span-5 text-[10px] text-[#8b92a5] py-6 text-center">
+              <div className="col-span-full py-6 text-center text-[10px] text-[#8b92a5]">
                 No hay alumnos registrados en la base de datos.
               </div>
             ) : (

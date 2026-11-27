@@ -22,6 +22,7 @@ class Estudiante extends Model
         'telefono',
         'estado',
         'direccion',
+        'foto_url',
     ];
 
     public function expedientes()

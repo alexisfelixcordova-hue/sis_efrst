@@ -29,19 +29,12 @@ import CabeceraExpediente from "./componentes/CabeceraExpediente";
 import ResumenAlumno from "./componentes/ResumenAlumno";
 import DatosPersonales, { sinVacios } from "./componentes/DatosPersonales";
 import DocumentosAlumnos from "./componentes/DocumentosAlumnos";
-
-const API = "http://localhost:8000/api";
-
-const cabeceras = () => {
-  const token =
-    localStorage.getItem("token") ||
-    localStorage.getItem("access_token");
-
-  return {
-    Accept: "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-};
+import api from "../../../api/axios.js";
+import {
+  normalizarNombreModulo,
+  publicarModuloSistema,
+  useModuloSistema,
+} from "../../../utils/moduloSistema.js";
 
 const leerJSON = (key, fallback = null) => {
   try {
@@ -250,14 +243,7 @@ const listaDe = (data) => {
   return [];
 };
 
-const leerLista = async (res) => {
-  try {
-    if (res && res.ok) return listaDe(await res.json());
-  } catch {
-    /* ignorar */
-  }
-  return [];
-};
+const leerLista = (res) => listaDe(res?.data);
 
 const esVerdadero = (v) =>
   v === true || v === 1 || v === "1" || v === "t" || v === "true";
@@ -342,6 +328,7 @@ const normalizarModulo = (mod, indice = 0) => {
   const comentarioRevisionExtraido = primerTexto(
     mod?.comentario_revision,
     mod?.observacion_revision,
+    mod?.comentario,
     revObj?.observaciones,
     revObj?.comentario
   );
@@ -355,11 +342,13 @@ const normalizarModulo = (mod, indice = 0) => {
     id_modulo: idModulo,
     numero_modulo: numeroModulo,
 
-    nombre_modulo: primerTexto(
-      mod?.nombre_modulo,
-      mod?.modulo_nombre,
-      mod?.modulo,
-      `Módulo ${ROMANOS[numeroModulo - 1] || numeroModulo}`
+    nombre_modulo: normalizarNombreModulo(
+      primerTexto(
+        mod?.nombre_modulo,
+        mod?.modulo_nombre,
+        mod?.modulo,
+        `Módulo ${ROMANOS[numeroModulo - 1] || numeroModulo}`
+      )
     ),
 
     periodo_academico: primerTexto(
@@ -387,6 +376,7 @@ const normalizarModulo = (mod, indice = 0) => {
 
     empresa_entidad: primerTexto(
       mod?.empresa_entidad,
+      mod?.empresa_razon_social,
       mod?.empresa_institucion,
       mod?.empresa_nombre,
       mod?.razon_social,
@@ -734,6 +724,7 @@ export default function ExpedienteAlumno({
   onVolver,
   darkMode = false,
 }) {
+  const moduloSistema = useModuloSistema();
   const estudianteRespaldo = useMemo(() => {
     if (estudiante && typeof estudiante === "object") return estudiante;
     return leerJSON("expediente_alumno_actual", null);
@@ -766,36 +757,17 @@ export default function ExpedienteAlumno({
         resEmpresas,
         resDocentes,
       ] = await Promise.all([
-        fetch(`${API}/estudiantes/${idEstudiante}`, {
-          headers: cabeceras(),
-        }).catch(() => null),
-
-        fetch(
-          `${API}/estudiantes/${idEstudiante}/expediente-modulos`,
-          { headers: cabeceras() }
-        ).catch(() => null),
-
-        fetch(
-          `${API}/evidencias-efsrt?id_estudiante=${idEstudiante}`,
-          { headers: cabeceras() }
-        ).catch(() => null),
-
-        fetch(`${API}/modulos-profesionales`, {
-          headers: cabeceras(),
-        }).catch(() => null),
-
-        fetch(`${API}/empresas?per_page=500&todos=1`, {
-          headers: cabeceras(),
-        }).catch(() => null),
-
-        fetch(`${API}/docentes?per_page=500&todos=1`, {
-          headers: cabeceras(),
-        }).catch(() => null),
+        api.get(`/estudiantes/${idEstudiante}`).catch(() => null),
+        api.get(`/estudiantes/${idEstudiante}/expediente-modulos`).catch(() => null),
+        api.get("/evidencias-efsrt", { params: { id_estudiante: idEstudiante } }).catch(() => null),
+        api.get("/modulos-profesionales").catch(() => null),
+        api.get("/empresas", { params: { per_page: 500, todos: 1 } }).catch(() => null),
+        api.get("/docentes", { params: { per_page: 500, todos: 1 } }).catch(() => null),
       ]);
 
       let alumnoBackend = null;
-      if (resAlumno && resAlumno.ok) {
-        const dataAlumno = await resAlumno.json();
+      if (resAlumno) {
+        const dataAlumno = resAlumno.data;
         alumnoBackend =
           dataAlumno.data ??
           dataAlumno.estudiante ??
@@ -804,8 +776,8 @@ export default function ExpedienteAlumno({
       }
 
       let catalogoBD = MODULOS_CATALOGO;
-      if (resCatalogoMod && resCatalogoMod.ok) {
-        const dataCat = await resCatalogoMod.json();
+      if (resCatalogoMod) {
+        const dataCat = resCatalogoMod.data;
         const rawCat = Array.isArray(dataCat)
           ? dataCat
           : Array.isArray(dataCat?.data)
@@ -816,10 +788,10 @@ export default function ExpedienteAlumno({
         }
       }
 
-      const [empresasBD, docentesBD] = await Promise.all([
+      const [empresasBD, docentesBD] = [
         leerLista(resEmpresas),
         leerLista(resDocentes),
-      ]);
+      ];
       const empresaPorId = new Map(
         empresasBD.map((e) => [String(e.id_empresa ?? e.id), e])
       );
@@ -834,8 +806,8 @@ export default function ExpedienteAlumno({
       });
 
       let evidenciasAPI = [];
-      if (resEv && resEv.ok) {
-        const dataEv = await resEv.json();
+      if (resEv) {
+        const dataEv = resEv.data;
         const rawEv = Array.isArray(dataEv)
           ? dataEv
           : Array.isArray(dataEv?.data)
@@ -872,8 +844,8 @@ export default function ExpedienteAlumno({
         evidenciasAPI.length > 0 ? evidenciasAPI : evidenciasLocales;
 
       let lista = [];
-      if (resModulos && resModulos.ok) {
-        const dataModulos = await resModulos.json();
+      if (resModulos) {
+        const dataModulos = resModulos.data;
         const registros = Array.isArray(dataModulos)
           ? dataModulos
           : Array.isArray(dataModulos.data)
@@ -1257,6 +1229,13 @@ export default function ExpedienteAlumno({
         if (actual && lista.some((m) => String(m.id_expediente) === String(actual))) {
           return actual;
         }
+        const coincidenteSistema = moduloSistema?.id_modulo
+          ? lista.find(
+              (modulo) =>
+                String(modulo.id_modulo) === String(moduloSistema.id_modulo)
+            )
+          : null;
+        if (coincidenteSistema) return coincidenteSistema.id_expediente;
         const coincidenteAlumno = lista.find(
           (m) => Number(m.numero_modulo) === Number(numeroModuloAlumno)
         );
@@ -1290,6 +1269,15 @@ export default function ExpedienteAlumno({
       window.removeEventListener("storage", actualizarSync);
     };
   }, []);
+
+  useEffect(() => {
+    if (!moduloSistema?.id_modulo) return;
+    const coincidente = modulos.find(
+      (modulo) =>
+        String(modulo.id_modulo) === String(moduloSistema.id_modulo)
+    );
+    if (coincidente) setModuloActivoId(coincidente.id_expediente);
+  }, [moduloSistema?.id_modulo, modulos]);
 
   const combinado = {
     ...sinVacios(estudianteRespaldo),
@@ -1719,6 +1707,7 @@ export default function ExpedienteAlumno({
                     setModuloActivoId(mod.id_expediente);
                     setSeccionActiva("resumen");
                     setBusqueda("");
+                    publicarModuloSistema(mod);
                   }}
                   className={`exp-tarjeta rounded-2xl border p-4 text-left ${
                     activo
@@ -1751,7 +1740,7 @@ export default function ExpedienteAlumno({
 
                   <div className="mt-4">
                     <p className={`text-[10px] font-bold uppercase tracking-wider ${textoSecundario}`}>
-                      Módulo {ROMANOS[numMod - 1] || numMod} · {metaHoras}h req.
+                      {metaHoras} horas requeridas
                     </p>
 
                     <h3 className="mt-1 text-sm font-bold">
@@ -1913,6 +1902,41 @@ export default function ExpedienteAlumno({
                     />
                   </div>
                 </Seccion>
+
+                {moduloActual.nota !== null && moduloActual.nota !== undefined && (
+                  <Seccion
+                    titulo="Resultado de la calificación"
+                    descripcion="Nota registrada para este módulo y su estado de revisión"
+                    icon={Award}
+                  >
+                    <div className={`grid gap-4 rounded-xl border p-5 sm:grid-cols-[auto_1fr] sm:items-center ${subpanel}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-500/10 text-xl font-extrabold text-blue-600">
+                          {Number(moduloActual.nota).toLocaleString("es-PE")}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">Nota final</p>
+                          <p className={`text-xs ${textoSecundario}`}>Escala vigesimal · máximo 20</p>
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                          Number(moduloActual.nota) >= NOTA_MINIMA
+                            ? "bg-emerald-500/10 text-emerald-600"
+                            : "bg-amber-500/10 text-amber-600"
+                        }`}>
+                          {Number(moduloActual.nota) >= NOTA_MINIMA ? "Aprobado" : "Requiere seguimiento"}
+                          {moduloActual.estado_revision ? ` · ${moduloActual.estado_revision}` : ""}
+                        </span>
+                        {moduloActual.comentario_revision && (
+                          <p className={`mt-2 break-words text-sm ${textoSecundario}`}>
+                            {moduloActual.comentario_revision}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </Seccion>
+                )}
 
                 <Seccion
                   titulo="Centro de prácticas"

@@ -36,11 +36,14 @@ class AuthController extends Controller
             'token_type'   => 'Bearer',
             'user'         => [
                 'id_usuario'  => $user->id_usuario,
+                'dni'         => $user->dni,
                 'nombres'     => $user->nombres,
                 'apellidos'   => $user->apellidos,
                 'correo'      => $user->correo,
+                'telefono'    => $user->telefono,
                 'foto_perfil' => $user->foto_perfil,
                 'id_rol'      => $user->id_rol,
+                'rol_nombre'  => $user->rol ? $user->rol->nombre_rol : ($user->id_rol == 1 ? 'Administrador' : 'Docente'),
                 'rol'         => $user->rol ? $user->rol->nombre_rol : ($user->id_rol == 1 ? 'Administrador' : 'Docente')
             ]
         ], 200);

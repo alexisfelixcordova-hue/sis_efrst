@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 class EstudianteController extends Controller
 {
@@ -83,13 +85,31 @@ class EstudianteController extends Controller
             'programa_estudios' => 'nullable|string|max:255',
             'semestre' => 'nullable|string|max:50',
             'estado' => 'nullable|string|max:50',
+            'foto' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
         if (empty($validated['estado'])) {
             $validated['estado'] = 'En progreso';
         }
 
-        $estudiante = Estudiante::create($validated);
+        $rutaFoto = null;
+        if ($request->hasFile('foto')) {
+            $rutaFoto = $request->file('foto')->store('estudiantes', 'public');
+            if (!$rutaFoto) {
+                throw new \RuntimeException('No se pudo guardar la foto del estudiante.');
+            }
+            $validated['foto_url'] = '/storage/' . $rutaFoto;
+        }
+
+        unset($validated['foto']);
+        try {
+            $estudiante = Estudiante::create($validated);
+        } catch (Throwable $error) {
+            if ($rutaFoto) {
+                Storage::disk('public')->delete($rutaFoto);
+            }
+            throw $error;
+        }
         Cache::forget(self::CACHE_TODOS);
 
         return response()->json([
@@ -142,9 +162,41 @@ class EstudianteController extends Controller
             'programa_estudios' => 'nullable|string|max:255',
             'semestre' => 'nullable|string|max:50',
             'estado' => 'sometimes|string|max:50',
+            'foto' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'eliminar_foto' => 'sometimes|boolean',
         ]);
 
-        $estudiante->update($validated);
+        $fotoAnterior = $estudiante->foto_url;
+        $rutaFotoNueva = null;
+
+        if ($request->hasFile('foto')) {
+            $rutaFotoNueva = $request->file('foto')->store('estudiantes', 'public');
+            if (!$rutaFotoNueva) {
+                throw new \RuntimeException('No se pudo guardar la foto del estudiante.');
+            }
+            $validated['foto_url'] = '/storage/' . $rutaFotoNueva;
+        } elseif ($request->boolean('eliminar_foto')) {
+            $validated['foto_url'] = null;
+        }
+
+        unset($validated['foto'], $validated['eliminar_foto']);
+
+        try {
+            $estudiante->update($validated);
+        } catch (Throwable $error) {
+            if ($rutaFotoNueva) {
+                Storage::disk('public')->delete($rutaFotoNueva);
+            }
+            throw $error;
+        }
+
+        if ($fotoAnterior && ($request->boolean('eliminar_foto') || $rutaFotoNueva)) {
+            $rutaAnterior = $this->rutaAlmacenada($fotoAnterior);
+            if ($rutaAnterior && Storage::disk('public')->exists($rutaAnterior)) {
+                Storage::disk('public')->delete($rutaAnterior);
+            }
+        }
+
         Cache::forget(self::CACHE_TODOS);
 
         return response()->json([
@@ -168,7 +220,14 @@ class EstudianteController extends Controller
             ], 404);
         }
 
+        $fotoAnterior = $estudiante->foto_url;
         $estudiante->delete();
+
+        $rutaAnterior = $this->rutaAlmacenada($fotoAnterior);
+        if ($rutaAnterior && Storage::disk('public')->exists($rutaAnterior)) {
+            Storage::disk('public')->delete($rutaAnterior);
+        }
+
         Cache::forget(self::CACHE_TODOS);
 
         return response()->json([
@@ -227,5 +286,19 @@ class EstudianteController extends Controller
         }
 
         return response()->json($data, 200);
+    }
+
+    private function rutaAlmacenada(?string $fotoUrl): ?string
+    {
+        if (!$fotoUrl) {
+            return null;
+        }
+
+        $ruta = parse_url($fotoUrl, PHP_URL_PATH) ?: $fotoUrl;
+        if (!str_starts_with($ruta, '/storage/')) {
+            return null;
+        }
+
+        return substr($ruta, strlen('/storage/'));
     }
 }

@@ -16,6 +16,7 @@ class ExpedienteEfsrt extends Model
         'id_estudiante',
         'id_modulo',
         'id_empresa',
+        'fecha_inicio',
         'id_docente_asesor',
         'horas_acumuladas',
         'estado_efsrt',

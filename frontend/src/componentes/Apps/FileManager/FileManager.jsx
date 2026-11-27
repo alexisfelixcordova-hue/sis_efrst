@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Folder,
   FolderOpen,
@@ -50,6 +50,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { useDropzone } from "react-dropzone";
 import { renderAsync } from "docx-preview";
 import * as XLSX from "xlsx";
+import api, { invalidateApiCache } from "../../../api/axios.js";
 
 const COLORES = [
   "#2563eb",
@@ -69,19 +70,6 @@ const ICONOS_CARPETA = {
   archivo: Archive,
   estrella: Star
 };
-
-const demo = () => [
-  { id: "1", padre: null, tipo: "carpeta", nombre: "Bitácoras", color: "#2563eb", icono: "carpeta", fecha: "2026-11-05" },
-  { id: "2", padre: null, tipo: "carpeta", nombre: "Informes", color: "#7c3aed", icono: "libros", fecha: "2026-11-02" },
-  { id: "3", padre: null, tipo: "carpeta", nombre: "Constancias", color: "#0891b2", icono: "archivo", fecha: "2026-10-28" },
-  { id: "4", padre: null, tipo: "carpeta", nombre: "Convenios", color: "#059669", icono: "trabajo", fecha: "2026-09-15" },
-  { id: "5", padre: "1", tipo: "archivo", nombre: "bitacora-semana-8.pdf", tam: 421888, fecha: "2026-11-08" },
-  { id: "6", padre: "1", tipo: "archivo", nombre: "bitacora-semana-5.pdf", tam: 398336, fecha: "2026-11-05" },
-  { id: "7", padre: "2", tipo: "archivo", nombre: "informe-parcial.pdf", tam: 1258291, fecha: "2026-11-07" },
-  { id: "8", padre: "3", tipo: "archivo", nombre: "constancia-vega-ramos.pdf", tam: 215040, fecha: "2026-10-28" },
-  { id: "9", padre: "4", tipo: "archivo", nombre: "convenio-tech-solutions.docx", tam: 102400, fecha: "2026-09-15" },
-  { id: "10", padre: null, tipo: "archivo", nombre: "plan-de-practicas-2026.xlsx", tam: 86016, fecha: "2026-09-01" }
-];
 
 const extension = (nombre = "") =>
   nombre.split(".").pop().toLowerCase();
@@ -165,7 +153,7 @@ const tipoArchivo = (nombre) => {
 };
 
 export default function FileManager() {
-  const [items, setItems] = useState(demo);
+  const [items, setItems] = useState([]);
   const [actual, setActual] = useState(null);
 
   const [busqueda, setBusqueda] = useState("");
@@ -196,11 +184,62 @@ export default function FileManager() {
   const [errorVista, setErrorVista] = useState("");
 
   const [papelera, setPapelera] = useState([]);
+  const [cargandoArchivos, setCargandoArchivos] = useState(true);
+  const [datosCargados, setDatosCargados] = useState(false);
+  const [guardandoArchivos, setGuardandoArchivos] = useState(false);
 
   const [docxListo, setDocxListo] = useState(false);
 
   const inputRef = useRef(null);
   const docxRef = useRef(null);
+
+  const cargarMetadatos = useCallback(async () => {
+    setCargandoArchivos(true);
+    setErrorVista("");
+    try {
+      const { data } = await api.get("/apps/archivos");
+      const almacenados = data?.data || {};
+      setItems(Array.isArray(almacenados.items) ? almacenados.items : []);
+      setPapelera(Array.isArray(almacenados.papelera) ? almacenados.papelera : []);
+      setDatosCargados(true);
+    } catch (error) {
+      setErrorVista(
+        error?.response?.data?.message || "No se pudieron cargar tus archivos."
+      );
+    } finally {
+      setCargandoArchivos(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void cargarMetadatos();
+  }, [cargarMetadatos]);
+
+  useEffect(() => {
+    if (!datosCargados) return undefined;
+    const serializar = (lista) =>
+      lista.map(({ archivo: _archivo, ...item }) => item);
+    const timer = setTimeout(async () => {
+      setGuardandoArchivos(true);
+      try {
+        await api.put("/apps/archivos", {
+          datos: {
+            items: serializar(items),
+            papelera: serializar(papelera),
+          },
+        });
+        invalidateApiCache("/apps/archivos");
+        setErrorVista("");
+      } catch (error) {
+        setErrorVista(
+          error?.response?.data?.message || "No se pudieron guardar los cambios de archivos."
+        );
+      } finally {
+        setGuardandoArchivos(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [datosCargados, items, papelera]);
 
   const ruta = [];
 
@@ -265,20 +304,32 @@ export default function FileManager() {
     (i) => i.tipo === "carpeta" && i.id !== moviendo?.id
   );
 
-  const subirArchivos = (archivos) => {
+  const subirArchivos = async (archivos) => {
     if (!archivos?.length) return;
 
-    const nuevos = archivos.map((archivo) => ({
-      id: crypto.randomUUID(),
-      padre: actual,
-      tipo: "archivo",
-      nombre: archivo.name,
-      tam: archivo.size,
-      fecha: hoyClave(),
-      archivo
-    }));
-
-    setItems((prev) => [...prev, ...nuevos]);
+    const resultados = await Promise.allSettled(
+      archivos.map(async (archivo) => {
+        const formulario = new FormData();
+        formulario.append("archivo", archivo);
+        if (actual) formulario.append("padre", actual);
+        const { data } = await api.post("/apps/archivos/subir", formulario, {
+          headers: { "Content-Type": "multipart/form-data" },
+          timeout: 120000,
+        });
+        return data.data;
+      })
+    );
+    const nuevos = resultados
+      .filter((resultado) => resultado.status === "fulfilled")
+      .map((resultado) => resultado.value);
+    if (nuevos.length) setItems((prev) => [...prev, ...nuevos]);
+    const fallidos = resultados.filter((resultado) => resultado.status === "rejected");
+    if (fallidos.length) {
+      setErrorVista(
+        fallidos[0].reason?.response?.data?.message ||
+          `No se pudieron subir ${fallidos.length} archivo(s).`
+      );
+    }
   };
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
@@ -440,7 +491,7 @@ export default function FileManager() {
     setDestino("");
   };
 
-  const abrirElemento = (item) => {
+  const abrirElemento = async (item) => {
     if (item.tipo === "carpeta") {
       setActual(item.id);
       setBusqueda("");
@@ -448,9 +499,25 @@ export default function FileManager() {
       return;
     }
 
-    setArchivoSeleccionado(item);
-    setDetalles(null);
-    setMenuId(null);
+    try {
+      setCargando(true);
+      setErrorVista("");
+      const archivo =
+        item.archivo ||
+        (await api.get(`/apps/archivos/${item.id}/descargar`, {
+          responseType: "blob",
+          timeout: 120000,
+        })).data;
+      setArchivoSeleccionado({ ...item, archivo });
+      setDetalles(null);
+      setMenuId(null);
+    } catch (error) {
+      setErrorVista(
+        error?.response?.data?.message || "No se pudo abrir este archivo."
+      );
+    } finally {
+      setCargando(false);
+    }
   };
 
   const descargar = () => {
@@ -462,17 +529,25 @@ export default function FileManager() {
     enlace.click();
   };
 
-  const descargarItem = (item) => {
-    if (!item.archivo) return;
-
-    const url = URL.createObjectURL(item.archivo);
-    const enlace = document.createElement("a");
-
-    enlace.href = url;
-    enlace.download = item.nombre;
-    enlace.click();
-
-    URL.revokeObjectURL(url);
+  const descargarItem = async (item) => {
+    try {
+      const archivo =
+        item.archivo ||
+        (await api.get(`/apps/archivos/${item.id}/descargar`, {
+          responseType: "blob",
+          timeout: 120000,
+        })).data;
+      const url = URL.createObjectURL(archivo);
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = item.nombre;
+      enlace.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setErrorVista(
+        error?.response?.data?.message || "No se pudo descargar este archivo."
+      );
+    }
   };
 
   useEffect(() => {
@@ -746,6 +821,19 @@ export default function FileManager() {
     );
   };
 
+  if (cargandoArchivos) {
+    return <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500">Cargando tus archivos...</p>;
+  }
+
+  if (!datosCargados) {
+    return (
+      <div className="mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white p-6 text-center">
+        <p role="alert" className="font-semibold text-red-600">{errorVista || "No se pudo conectar con tus archivos."}</p>
+        <button type="button" onClick={() => void cargarMetadatos()} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700">Reintentar</button>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-full space-y-6 font-['Plus_Jakarta_Sans',system-ui,sans-serif] text-slate-800">
 
@@ -765,6 +853,7 @@ export default function FileManager() {
               <p className="mt-0.5 text-xs text-slate-500">
                 Organiza, administra y visualiza tus documentos.
               </p>
+              {guardandoArchivos && <p className="mt-1 text-[11px] text-blue-600">Guardando cambios...</p>}
             </div>
           </div>
         </div>
@@ -783,6 +872,10 @@ export default function FileManager() {
               className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
             />
           </div>
+
+          {errorVista && !archivoSeleccionado && (
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{errorVista}</p>
+          )}
 
           <button
             onClick={() => setCreando(true)}
@@ -1592,7 +1685,7 @@ export default function FileManager() {
                   Icono de carpeta
                 </label>
 
-                <div className="mt-3 grid grid-cols-5 gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                   {Object.entries(ICONOS_CARPETA).map(([nombre, Icono]) => (
                     <button
                       key={nombre}

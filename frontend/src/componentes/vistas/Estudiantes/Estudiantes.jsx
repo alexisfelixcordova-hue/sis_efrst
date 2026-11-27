@@ -34,7 +34,7 @@ import {
   Flag,
   Zap,
 } from "lucide-react";
-import api, { getCachedData, clearApiCache } from "../../../api/axios";
+import api, { getCachedData, invalidateApiCache } from "../../../api/axios";
 import ModalEstudiante from "./componentes/ModalEstudiante";
 import ModalImportarEstudiantes from "./componentes/ModalImportarEstudiantes";
 
@@ -157,9 +157,12 @@ const iniciales = (e) => {
   return `${nom[0] || ""}${ape[0] || ""}`.toUpperCase();
 };
 
-const fotoDe = (e, size = 80) =>
-  e?.foto_url ||
-  `https://i.pravatar.cc/${size}?img=${((Number(idEstudianteDe(e)) || 0) % 50) + 1}`;
+const fotoDe = (e) =>
+  e?.foto_url
+    ? (/^(https?:|data:|blob:)/i.test(e.foto_url)
+        ? e.foto_url
+        : `${String(api.defaults.baseURL || "").replace(/\/api\/?$/, "")}/${String(e.foto_url).replace(/^\/+/, "")}`)
+    : "";
 
 const escaparRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -316,9 +319,10 @@ function Resaltar({ texto, consulta }) {
 /*  Avatar con respaldo de iniciales                                   */
 /* ================================================================== */
 function Avatar({ estudiante, size = 40, className = "" }) {
-  const [fallo, setFallo] = useState(false);
+  const [fotoFallida, setFotoFallida] = useState("");
   const px = { width: size, height: size };
-  if (fallo) {
+  const foto = fotoDe(estudiante);
+  if (!foto || fotoFallida === foto) {
     return (
       <div
         style={{ ...px, fontSize: size * 0.36 }}
@@ -330,12 +334,12 @@ function Avatar({ estudiante, size = 40, className = "" }) {
   }
   return (
     <img
-      src={fotoDe(estudiante, size * 2)}
+      src={foto}
       alt=""
       style={px}
       loading="lazy"
       decoding="async"
-      onError={() => setFallo(true)}
+      onError={() => setFotoFallida(foto)}
       className={`shrink-0 rounded-full object-cover ${className}`}
     />
   );
@@ -1148,7 +1152,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
 
   const obtenerEstudiantes = async ({ forzarRefresco = false } = {}) => {
     if (forzarRefresco) {
-      clearApiCache();
+      invalidateApiCache("/estudiantes");
       setCargando(true);
     } else if (estudiantes.length === 0) {
       setCargando(true);
@@ -1345,7 +1349,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
       return;
     try {
       await api.delete(`/estudiantes/${id}`);
-      clearApiCache();
+      invalidateApiCache("/estudiantes");
       setEstudiantes((prev) => prev.filter((e) => idEstudianteDe(e) !== id));
       setSeleccionados((prev) => prev.filter((x) => x !== id));
       setEstudianteRapido(null);
@@ -1368,7 +1372,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     const eliminados = ids.filter((_, i) => resultados[i].status === "fulfilled");
     const fallidos = ids.length - eliminados.length;
 
-    clearApiCache();
+    invalidateApiCache("/estudiantes");
     setEstudiantes((prev) => prev.filter((e) => !eliminados.includes(idEstudianteDe(e))));
     setSeleccionados((prev) => prev.filter((id) => !eliminados.includes(id)));
 
@@ -1692,7 +1696,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Filter size={17} className={tema.secundario} />
               <select
                 value={estadoActivo}
@@ -1730,8 +1734,120 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
           </div>
         </div>
 
-        <div className="max-h-[680px] overflow-auto">
-          <table className="w-full min-w-[1100px] text-left text-sm">
+        <div className="max-h-[680px] overflow-y-auto p-3 sm:hidden">
+          {cargando ? (
+            <div className="space-y-3" aria-label="Cargando estudiantes">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="animate-pulse rounded-xl border border-inherit p-4">
+                  <div className="skeleton mb-3 h-4 w-2/3 rounded" />
+                  <div className="skeleton h-3 w-1/2 rounded" />
+                </div>
+              ))}
+            </div>
+          ) : error ? (
+            <p className="py-8 text-center text-sm text-red-500">{error}</p>
+          ) : estudiantesPaginados.length > 0 ? (
+            <ul className="space-y-3">
+              {estudiantesPaginados.map((estudiante, i) => {
+                const idEst = idEstudianteDe(estudiante);
+                const marcado = seleccionados.includes(idEst);
+                const estadoValido = estadoNormalizado(estudiante);
+
+                return (
+                  <li
+                    key={idEst ?? i}
+                    onClick={() => abrirRapido(estudiante)}
+                    className={`rounded-xl border border-inherit p-3 ${tema.fila} ${
+                      marcado ? (darkMode ? "bg-blue-500/10" : "bg-blue-50/70") : ""
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={marcado}
+                        onChange={() => alternarSeleccion(idEst)}
+                        onClick={(event) => event.stopPropagation()}
+                        aria-label={`Seleccionar a ${nombreCompleto(estudiante)}`}
+                        className="mt-1 h-4 w-4 shrink-0 cursor-pointer rounded accent-blue-600"
+                      />
+                      <Avatar
+                        estudiante={estudiante}
+                        size="h-10 w-10"
+                        className="shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words font-semibold">
+                          {nombreCompleto(estudiante)}
+                        </p>
+                        <p className={`mt-1 text-xs ${tema.secundario}`}>
+                          DNI: {estudiante.dni || "Sin DNI"}
+                        </p>
+                        <p className="mt-2 break-words text-sm font-medium">
+                          {estudiante.programa_estudios || "Sin programa"}
+                        </p>
+                        <p className={`text-xs ${tema.secundario}`}>
+                          {estudiante.semestre || "Sin semestre"}
+                        </p>
+                        <p className={`mt-1 break-all text-xs ${tema.secundario}`}>
+                          {estudiante.correo || estudiante.email || "No registrado"}
+                        </p>
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                          <InsigniaEstado estado={estadoValido} />
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onVerEstudiante?.(estudiante);
+                              }}
+                              aria-label={`Ver expediente de ${nombreCompleto(estudiante)}`}
+                              className="rounded-lg border border-blue-200 p-2 text-blue-600"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleAbrirEditar(estudiante);
+                              }}
+                              aria-label={`Editar ${nombreCompleto(estudiante)}`}
+                              className="rounded-lg border border-amber-200 p-2 text-amber-600"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleEliminar(idEst);
+                              }}
+                              aria-label={`Eliminar ${nombreCompleto(estudiante)}`}
+                              className="rounded-lg border border-rose-200 p-2 text-rose-600"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="px-3 py-10 text-center">
+              <Search size={24} className="mx-auto text-slate-400" />
+              <p className="mt-3 font-semibold">No se encontraron estudiantes</p>
+              <p className={`mt-1 text-sm ${tema.secundario}`}>
+                Prueba con otro nombre, DNI o estado.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="hidden max-h-[680px] overflow-auto sm:block">
+          <table className="w-full min-w-[980px] text-left text-sm">
             <thead className={`sticky top-0 z-10 ${tema.encabezado}`}>
               <tr>
                 <th className="w-10 px-5 py-4">
@@ -1747,7 +1863,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                 {cabecera("dni", "DNI")}
                 {cabecera("programa", "Programa y Semestre")}
                 <th className="px-5 py-4 font-semibold">Correo / Teléfono</th>
-                {cabecera("avance", "Avance")}
                 {cabecera("estado", "Estado")}
                 <th className="px-5 py-4 text-right font-semibold">Acciones</th>
               </tr>
@@ -1771,7 +1886,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                         </div>
                       </div>
                     </td>
-                    {[70, 140, 120, 90, 80].map((w, j) => (
+                    {[70, 140, 120, 90].map((w, j) => (
                       <td key={j} className="px-5 py-4">
                         <div className="skeleton h-3 rounded" style={{ width: w }} />
                       </td>
@@ -1781,7 +1896,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                 ))
               ) : error ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-12 text-center text-red-500">
+                  <td colSpan={7} className="px-5 py-12 text-center text-red-500">
                     {error}
                   </td>
                 </tr>
@@ -1789,10 +1904,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                 estudiantesPaginados.map((estudiante, i) => {
                   const idEst = idEstudianteDe(estudiante);
                   const marcado = seleccionados.includes(idEst);
-                  const progreso = obtenerProgreso(estudiante);
                   const estadoValido = estadoNormalizado(estudiante);
-                  const colorBarra =
-                    colorEstado[estadoValido] || colorEstado["En progreso"];
                   return (
                     <tr
                       key={idEst ?? i}
@@ -1876,20 +1988,6 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                       </td>
 
                       <td className={`px-5 ${pad}`}>
-                        <div className="flex w-32 items-center gap-2">
-                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-500/15">
-                            <div
-                              className="barra-brillo h-full rounded-full transition-all duration-700"
-                              style={{ width: `${progreso}%`, background: colorBarra }}
-                            />
-                          </div>
-                          <span className={`w-9 text-right text-xs tabular-nums ${tema.secundario}`}>
-                            {progreso}%
-                          </span>
-                        </div>
-                      </td>
-
-                      <td className={`px-5 ${pad}`}>
                         <InsigniaEstado estado={estadoValido} />
                       </td>
 
@@ -1931,7 +2029,7 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
                 })
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-5 py-14 text-center">
+                  <td colSpan={7} className="px-5 py-14 text-center">
                     <div className="flex flex-col items-center">
                       <div className="flotar rounded-full bg-slate-100 p-4 text-slate-400">
                         <Search size={25} />

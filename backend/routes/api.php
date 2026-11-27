@@ -2,9 +2,12 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\AppDatosController;
+use App\Http\Controllers\Api\ArchivoAplicacionController;
 use App\Http\Controllers\Api\AsistenteController;
 use App\Http\Controllers\Api\AsignacionAsesorController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CalendarioController;
 use App\Http\Controllers\Api\ConstanciaEmitidaController;
 use App\Http\Controllers\Api\EmpresaController;
 use App\Http\Controllers\Api\EstudianteController;
@@ -15,6 +18,9 @@ use App\Http\Controllers\Api\DocenteController;
 use App\Http\Controllers\Api\BusquedaGlobalController;
 use App\Http\Controllers\Api\ReporteController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\ProyectoController;
+use App\Http\Controllers\Api\NotificacionController;
+
 
 // Rutas públicas
 Route::post('/login', [AuthController::class, 'login']);
@@ -52,20 +58,23 @@ Route::middleware('auth:sanctum')->group(function () {
     // ==========================================
     Route::get('/buscar-global', [BusquedaGlobalController::class, 'buscar']);
 
-    Route::get('/notificaciones/preferencias', function (Request $request) {
-        return response()->json($request->user()->preferencias_notificaciones ?? [], 200);
-    });
+    // Datos personales de las apps, aislados por cuenta autenticada
+    Route::post('/apps/archivos/subir', [ArchivoAplicacionController::class, 'store']);
+    Route::get('/apps/archivos/{id}/descargar', [ArchivoAplicacionController::class, 'download']);
+    Route::get('/apps/{aplicacion}', [AppDatosController::class, 'show'])
+        ->whereIn('aplicacion', ['notas', 'contactos', 'archivos']);
+    Route::put('/apps/{aplicacion}', [AppDatosController::class, 'update'])
+        ->whereIn('aplicacion', ['notas', 'contactos', 'archivos']);
 
-    Route::post('/notificaciones/preferencias', function (Request $request) {
-        $usuario = $request->user();
-        $usuario->preferencias_notificaciones = $request->input('preferencias');
-        $usuario->save();
-
-        return response()->json(['message' => 'Preferencias actualizadas correctamente'], 200);
-    });
+    Route::get('/notificaciones', [NotificacionController::class, 'index']);
+    Route::post('/notificaciones/leer-todas', [NotificacionController::class, 'marcarTodasLeidas']);
+    Route::patch('/notificaciones/{notification}/leer', [NotificacionController::class, 'marcarLeida']);
+    Route::get('/notificaciones/preferencias', [NotificacionController::class, 'preferencias']);
+    Route::post('/notificaciones/preferencias', [NotificacionController::class, 'actualizarPreferencias']);
 
     // Expedientes y calificación por módulo (expediente_efsrt)
     Route::get('/expedientes', [ExpedienteController::class, 'index']);
+    Route::get('/estudiantes/{id}/expediente-modulos', [ExpedienteController::class, 'porEstudiante']);
     Route::put('/expedientes/{id}/validar', [ExpedienteController::class, 'validarExpediente']);
     Route::post('/efsrt/calificaciones', [ExpedienteController::class, 'registrarCalificacion']);
     Route::post('/calificaciones-efsrt', [ExpedienteController::class, 'registrarCalificacion']);
@@ -106,6 +115,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/constancias-efsrt', [ConstanciaEmitidaController::class, 'index']);
     Route::post('/constancias/generar', [ConstanciaEmitidaController::class, 'generar']);
     Route::apiResource('constancias', ConstanciaEmitidaController::class)->except(['store', 'update']);
+
+    // Calendario (eventos, calendario_tareas, calendario_notas)
+    Route::prefix('calendario')->group(function () {
+        Route::get('/', [CalendarioController::class, 'index']);
+        Route::post('/eventos', [CalendarioController::class, 'storeEvento']);
+        Route::patch('/eventos/{id}', [CalendarioController::class, 'updateEvento']);
+        Route::delete('/eventos/{id}', [CalendarioController::class, 'destroyEvento']);
+        Route::post('/tareas', [CalendarioController::class, 'storeTarea']);
+        Route::patch('/tareas/{id}', [CalendarioController::class, 'updateTarea']);
+        Route::delete('/tareas/{id}', [CalendarioController::class, 'destroyTarea']);
+        Route::put('/notas', [CalendarioController::class, 'upsertNotas']);
+    });
+    Route::get('proyectos/opciones', [ProyectoController::class, 'opciones']);
+    Route::patch('proyectos/{proyecto}/estado', [ProyectoController::class, 'moverEstado']);
+    Route::apiResource('proyectos', ProyectoController::class);
 
     // Reportes y estadísticas
     Route::get('/reportes/estadisticas', [ReporteController::class, 'estadisticas']);

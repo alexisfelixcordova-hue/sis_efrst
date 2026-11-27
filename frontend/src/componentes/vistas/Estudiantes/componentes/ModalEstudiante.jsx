@@ -35,6 +35,7 @@ export default function ModalEstudiante({
 
   const [foto, setFoto] = useState(null);
   const [fotoPreview, setFotoPreview] = useState("");
+  const [eliminarFoto, setEliminarFoto] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [buscandoDni, setBuscandoDni] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -56,14 +57,26 @@ export default function ModalEstudiante({
         telefono: estudianteActual.telefono || "",
         estado: estudianteActual.estado || "En progreso",
       });
-      setFotoPreview(estudianteActual.foto_url || "");
+      const fotoUrl = estudianteActual.foto_url || "";
+      setFotoPreview(
+        fotoUrl && !/^(https?:|data:|blob:)/i.test(fotoUrl)
+          ? `${String(api.defaults.baseURL || "").replace(/\/api\/?$/, "")}/${String(fotoUrl).replace(/^\/+/, "")}`
+          : fotoUrl
+      );
       setFoto(null);
+      setEliminarFoto(false);
     } else {
       setFormData(formularioVacio);
       setFoto(null);
       setFotoPreview("");
+      setEliminarFoto(false);
     }
   }, [estudianteActual, isOpen]);
+
+  useEffect(() => {
+    if (!fotoPreview.startsWith("blob:")) return undefined;
+    return () => URL.revokeObjectURL(fotoPreview);
+  }, [fotoPreview]);
 
   if (!isOpen) return null;
 
@@ -119,8 +132,8 @@ export default function ModalEstudiante({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setErrorMsg("El archivo debe ser una imagen válida (JPG o PNG).");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setErrorMsg("La foto debe estar en formato JPG, PNG o WebP.");
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
@@ -129,11 +142,13 @@ export default function ModalEstudiante({
     }
     setFoto(file);
     setFotoPreview(URL.createObjectURL(file));
+    setEliminarFoto(false);
   };
 
   const handleQuitarFoto = () => {
     setFoto(null);
     setFotoPreview("");
+    setEliminarFoto(Boolean(estudianteActual?.foto_url));
   };
 
   const handleSubmit = async (e) => {
@@ -150,6 +165,8 @@ export default function ModalEstudiante({
       });
       if (foto) {
         payload.append("foto", foto);
+      } else if (eliminarFoto) {
+        payload.append("eliminar_foto", "1");
       }
 
       if (estudianteActual) {
@@ -448,6 +465,10 @@ export default function ModalEstudiante({
                     </select>
                   </div>
                 </div>
+                <p className={`text-xs sm:ml-[33.333%] ${tema.label}`}>
+                  Avanza al siguiente semestre solo cuando el estudiante apruebe. Si no aprueba,
+                  conserva el semestre actual; el sistema no lo cambia automáticamente.
+                </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-12 items-center gap-2">
                   <label className={`sm:col-span-4 text-xs font-semibold sm:text-right pr-2 ${tema.label}`}>

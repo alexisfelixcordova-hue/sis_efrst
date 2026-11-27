@@ -29,7 +29,8 @@ import {
   FileCheck2,
   X,
 } from "lucide-react";
-import api, { getCachedData, clearApiCache } from "../../../../api/axios";
+import api, { getCachedData, invalidateApiCache } from "../../../../api/axios";
+import AvatarEstudiante from "../../../AvatarEstudiante.jsx";
 
 const k = (id) => String(id);
 
@@ -143,10 +144,19 @@ const ubicacionEmpresaDe = (emp) =>
   emp?.region ??
   "";
 
-const nombreDe = (p) => {
-  const base = p?.estudiante || p?.alumno || p || {};
-  return `${base?.nombres || base?.nombre || ""} ${base?.apellidos || ""}`.trim();
+const basePersonaDe = (p) => p?.estudiante || p?.alumno || p || {};
+
+const nombresDe = (p) => {
+  const base = basePersonaDe(p);
+  return base?.nombres || base?.nombre || "";
 };
+
+const apellidosDe = (p) => {
+  const base = basePersonaDe(p);
+  return base?.apellidos || "";
+};
+
+const nombreDe = (p) => `${nombresDe(p)} ${apellidosDe(p)}`.trim();
 
 const especialidadDocenteDe = (d) =>
   d?.especialidad ||
@@ -156,17 +166,17 @@ const especialidadDocenteDe = (d) =>
   "Asesor EFSRT";
 
 const dniDe = (e) => {
-  const base = e?.estudiante || e?.alumno || e || {};
+  const base = basePersonaDe(e);
   return base.dni || base.numero_documento || "Sin DNI";
 };
 
 const programaDe = (e) => {
-  const base = e?.estudiante || e?.alumno || e || {};
+  const base = basePersonaDe(e);
   return base.programa_estudios || base.programa || base.especialidad || "";
 };
 
 const correoDe = (e) => {
-  const base = e?.estudiante || e?.alumno || e || {};
+  const base = basePersonaDe(e);
   return base.correo || base.email || "";
 };
 
@@ -276,6 +286,40 @@ const guardarRegistroLocalModulo = (idEst, idMod, numMod, obj) => {
   });
 };
 
+const CANAL_SYNC_EMPRESAS = "efsrt_empresas_asignadas_sync_v1";
+const KEY_SNAPSHOT_EMPRESAS_REALTIME = "efsrt_empresas_realtime_snapshot_v1";
+
+const emitirEventoTiempoRealEmpresas = (detalle) => {
+  const payload = { ...detalle, timestamp: Date.now() };
+  try {
+    sessionStorage.setItem(
+      KEY_SNAPSHOT_EMPRESAS_REALTIME,
+      JSON.stringify(payload)
+    );
+  } catch {
+    /* ignorar */
+  }
+  try {
+    window.dispatchEvent(
+      new CustomEvent("empresas:asignacion-tiempo-real", { detail: payload })
+    );
+    window.dispatchEvent(
+      new CustomEvent("expediente:actualizado", { detail: payload })
+    );
+  } catch {
+    /* ignorar */
+  }
+  try {
+    if (typeof BroadcastChannel !== "undefined") {
+      const bc = new BroadcastChannel(CANAL_SYNC_EMPRESAS);
+      bc.postMessage(payload);
+      bc.close();
+    }
+  } catch {
+    /* ignorar */
+  }
+};
+
 const MEM = { docentes: null, estudiantes: null, modulos: null, empresas: null };
 const ASIG_MEM = new Map();
 const EN_VUELO = new Map();
@@ -314,36 +358,21 @@ const traerAsignadosApi = async (docId, modId, anioV) => {
   return pedir(clave, async () => {
     const headers = cabeceraAuth();
     if (docId) {
-      // Primero consultamos por docente (y con parámetros opcionales) para no perder asignaciones existentes
-      const resConFiltro = await api.get(`/docentes/${docId}/estudiantes`, {
+      const res = await api.get(`/docentes/${docId}/estudiantes`, {
         params: {
-          all: true,
-          todos: 1,
-          per_page: 1000,
           ...(modId ? { id_modulo: modId } : {}),
-          ...(anioV ? { anio: anioV, periodo_academico: anioV } : {}),
+          ...(anioV ? { periodo_academico: `${anioV}-II` } : {}),
         },
         headers,
       });
-      const listaFiltrada = extraerLista(resConFiltro.data);
-      if (listaFiltrada.length > 0) return listaFiltrada;
-
-      // Si con filtro vino vacío, probamos sin filtro de módulo/año por si el backend no filtra igual
-      const resSinFiltro = await api.get(`/docentes/${docId}/estudiantes`, {
-        params: { all: true, todos: 1, per_page: 1000 },
-        headers,
-      });
-      return extraerLista(resSinFiltro.data);
+      return extraerLista(res.data);
     }
 
     const resModulo = await api.get(
       `/modulos-profesionales/${modId}/estudiantes`,
       {
         params: {
-          all: true,
-          todos: 1,
-          per_page: 1000,
-          ...(anioV ? { anio: anioV, periodo_academico: anioV } : {}),
+          ...(anioV ? { anio: anioV, periodo_academico: `${anioV}-II` } : {}),
         },
         headers,
       }
@@ -462,6 +491,7 @@ export default function AsignarEstudiantes({
   const [empresasIniciales, setEmpresasIniciales] = useState({});
 
   const [vista, setVista] = useState("asignados");
+  const [filtroPracticas, setFiltroPracticas] = useState("todos");
   const [cargandoAsignados, setCargandoAsignados] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
@@ -509,6 +539,44 @@ export default function AsignarEstudiantes({
       );
     }
   }, [empresasProp]);
+
+  useEffect(() => {
+    const refrescarEmpresasDesdeEvento = (ev) => {
+      const empNueva = ev?.detail?.empresa || ev?.detail;
+      if (empNueva && obtenerIdEmpresa(empNueva) != null) {
+        const idN = k(obtenerIdEmpresa(empNueva));
+        setListaEmpresas((prev) => {
+          const existe = prev.some((x) => k(obtenerIdEmpresa(x)) === idN);
+          return existe
+            ? prev.map((x) =>
+                k(obtenerIdEmpresa(x)) === idN ? { ...x, ...empNueva } : x
+              )
+            : [empNueva, ...prev];
+        });
+      }
+      invalidateApiCache("/empresas");
+      api
+        .get("/empresas", {
+          params: { per_page: 500, todos: 1, all: true },
+          headers: cabeceraAuth(),
+        })
+        .then((res) => {
+          const l = extraerLista(res.data);
+          if (l.length > 0) {
+            MEM.empresas = l;
+            setListaEmpresas(l);
+          }
+        })
+        .catch(() => {});
+    };
+
+    window.addEventListener("empresas:actualizada", refrescarEmpresasDesdeEvento);
+    return () =>
+      window.removeEventListener(
+        "empresas:actualizada",
+        refrescarEmpresasDesdeEvento
+      );
+  }, []);
 
   useEffect(() => {
     let activo = true;
@@ -718,6 +786,10 @@ export default function AsignarEstudiantes({
       const idEst = obtenerIdEstudiante(raw);
       if (idEst != null) {
         const previo = combinadosMap.get(k(idEst)) || {};
+        const tieneEmpresaEnRespuesta =
+          typeof raw === "object" &&
+          raw !== null &&
+          Object.prototype.hasOwnProperty.call(raw, "id_empresa");
         combinadosMap.set(k(idEst), {
           ...previo,
           ...baseAlumno,
@@ -727,12 +799,12 @@ export default function AsignarEstudiantes({
             raw?.pivot?.fecha_inicio ??
             baseAlumno?.fecha_inicio ??
             previo?.fecha_inicio,
-          id_empresa:
-            raw?.id_empresa ??
-            raw?.empresa_id ??
-            raw?.pivot?.id_empresa ??
-            baseAlumno?.id_empresa ??
-            previo?.id_empresa,
+          id_empresa: tieneEmpresaEnRespuesta
+            ? raw.id_empresa
+            : raw?.empresa_id ??
+              raw?.pivot?.id_empresa ??
+              baseAlumno?.id_empresa ??
+              previo?.id_empresa,
         });
       }
     });
@@ -743,13 +815,17 @@ export default function AsignarEstudiantes({
 
     ids.forEach((idKey) => {
       const item = combinadosMap.get(idKey);
-      if (!mapaFechas[idKey]) {
+      if (item?.fecha_inicio) {
+        mapaFechas[idKey] = item.fecha_inicio;
+      } else if (!mapaFechas[idKey]) {
         mapaFechas[idKey] =
           item?.fecha_inicio ||
           item?.pivot?.fecha_inicio ||
           fechaPorDefectoAnio;
       }
-      if (!mapaEmpresas[idKey]) {
+      if (Object.prototype.hasOwnProperty.call(item || {}, "id_empresa")) {
+        mapaEmpresas[idKey] = item.id_empresa ? k(item.id_empresa) : "";
+      } else if (!mapaEmpresas[idKey]) {
         const empId =
           item?.id_empresa ??
           item?.empresa_id ??
@@ -921,6 +997,44 @@ export default function AsignarEstudiantes({
       .map((id) => mapa.get(k(id)) || { id, nombres: `Estudiante #${id}` })
       .filter((est) => coincide(est, q));
   }, [seleccionados, mapa, busquedaAsigDif]);
+  const idsAsignadosConEmpresa = useMemo(
+    () =>
+      new Set(
+        asignados
+          .filter((est) => {
+            const id = k(obtenerIdEstudiante(est));
+            const empresaId = Object.prototype.hasOwnProperty.call(
+              empresasPorEstudiante,
+              id
+            )
+              ? empresasPorEstudiante[id]
+              : est.id_empresa ?? est.empresa_id ?? est.pivot?.id_empresa ?? "";
+            return Boolean(empresaId);
+          })
+          .map((est) => k(obtenerIdEstudiante(est)))
+      ),
+    [asignados, empresasPorEstudiante]
+  );
+  const asignadosConEmpresa = useMemo(
+    () =>
+      asignados.filter((est) =>
+        idsAsignadosConEmpresa.has(k(obtenerIdEstudiante(est)))
+      ),
+    [asignados, idsAsignadosConEmpresa]
+  );
+  const asignadosSinEmpresa = useMemo(
+    () =>
+      asignados.filter(
+        (est) => !idsAsignadosConEmpresa.has(k(obtenerIdEstudiante(est)))
+      ),
+    [asignados, idsAsignadosConEmpresa]
+  );
+  const asignadosVisibles =
+    filtroPracticas === "con-empresa"
+      ? asignadosConEmpresa
+      : filtroPracticas === "sin-empresa"
+        ? asignadosSinEmpresa
+        : asignados;
 
   const agregados = seleccionados.filter((id) => !setIni.has(k(id))).length;
   const quitados = idsIniciales.filter((id) => !setSel.has(k(id))).length;
@@ -935,111 +1049,200 @@ export default function AsignarEstudiantes({
   hayCambiosRef.current = hayCambios;
 
   useEffect(() => {
+    setFiltroPracticas("todos");
+  }, [docenteSeleccionadoId, moduloId, anio]);
+
+  useEffect(() => {
     setLimiteDisp(PAGINA_DISP);
   }, [busquedaDispDif, programaEstudio]);
 
   const bloqueado = guardando;
 
+  const construirFilasRealtime = (
+    idsLista,
+    mapaEmp,
+    mapaFech,
+    docId = docenteSeleccionadoId,
+    modId = moduloId
+  ) => {
+    const nombreMod = nombreModuloDe(moduloActual) || `Módulo ${modId || 1}`;
+    const nombreDoc = nombreDe(docenteActual) || "Asesor EFSRT";
+
+    return idsLista.map((id) => {
+      const key = k(id);
+      const estObj = mapa.get(key) || { id_estudiante: id };
+      const empIdStr = mapaEmp[key] ?? empresaBaseId ?? "";
+      const empObj = empIdStr ? mapaEmpresas.get(k(empIdStr)) : null;
+
+      return {
+        id_estudiante: Number.isNaN(Number(id)) ? id : Number(id),
+        nombres: nombresDe(estObj) || nombreDe(estObj) || `Estudiante #${id}`,
+        apellidos: apellidosDe(estObj),
+        dni: dniDe(estObj),
+        programa_estudios: programaDe(estObj),
+        id_docente: docId || null,
+        docente_responsable: nombreDoc,
+        id_modulo: modId || null,
+        numero_modulo: numModuloActual,
+        nombre_modulo: nombreMod,
+        periodo_academico: `${anio}-II`,
+        id_empresa: empIdStr
+          ? Number.isNaN(Number(empIdStr))
+            ? empIdStr
+            : Number(empIdStr)
+          : null,
+        empresa_nombre: empObj ? nombreEmpresaDe(empObj) : "",
+        fecha_inicio: mapaFech[key] || fechaPorDefectoAnio,
+        anio: Number(anio),
+      };
+    });
+  };
+
+  const notificarTiempoReal = (
+    idsLista,
+    mapaEmp,
+    mapaFech,
+    confirmadoServidor = false
+  ) => {
+    const alcanceKey = `${k(docenteSeleccionadoId || "none")}::${k(
+      moduloId || "1"
+    )}::${anio}`;
+    const filas = construirFilasRealtime(idsLista, mapaEmp, mapaFech);
+
+    emitirEventoTiempoRealEmpresas({
+      alcanceKey,
+      id_docente: docenteSeleccionadoId || null,
+      docente_responsable: nombreDe(docenteActual) || "Asesor EFSRT",
+      id_modulo: moduloId || null,
+      numero_modulo: numModuloActual,
+      nombre_modulo: nombreModuloDe(moduloActual) || `Módulo ${moduloId || 1}`,
+      anio: Number(anio),
+      confirmadoServidor,
+      asignaciones: filas,
+    });
+  };
+
   const agregar = (id) => {
     const key = k(id);
+    if (setSel.has(key)) return;
     setError("");
     setMensajeExito("");
-    setSeleccionados((prev) =>
-      prev.some((x) => k(x) === key) ? prev : [...prev, key]
-    );
-    setFechasInicio((prev) => ({
-      ...prev,
-      [key]: prev[key] || fechaPorDefectoAnio,
-    }));
-    setEmpresasPorEstudiante((prev) => ({
-      ...prev,
-      [key]: prev[key] ?? (empresaBaseId ? k(empresaBaseId) : ""),
-    }));
+
+    const fechaAsignada = fechasInicio[key] || fechaPorDefectoAnio;
+    const empresaAsignada =
+      empresasPorEstudiante[key] !== undefined &&
+      empresasPorEstudiante[key] !== ""
+        ? k(empresasPorEstudiante[key])
+        : empresaBaseId
+          ? k(empresaBaseId)
+          : "";
+
+    const nextIds = [...seleccionados, key];
+    const nextFechas = { ...fechasInicio, [key]: fechaAsignada };
+    const nextEmpresas = { ...empresasPorEstudiante, [key]: empresaAsignada };
+
+    setSeleccionados(nextIds);
+    setFechasInicio(nextFechas);
+    setEmpresasPorEstudiante(nextEmpresas);
+    notificarTiempoReal(nextIds, nextEmpresas, nextFechas, false);
   };
 
   const quitar = (id) => {
     const key = k(id);
     setError("");
     setMensajeExito("");
-    setSeleccionados((prev) => prev.filter((x) => k(x) !== key));
+
+    const nextIds = seleccionados.filter((x) => k(x) !== key);
+    setSeleccionados(nextIds);
+    notificarTiempoReal(nextIds, empresasPorEstudiante, fechasInicio, false);
   };
 
   const cambiarFechaEstudiante = (id, nuevaFecha) => {
     const key = k(id);
     setError("");
     setMensajeExito("");
-    setFechasInicio((prev) => ({
-      ...prev,
-      [key]: nuevaFecha,
-    }));
+    const nextFechas = { ...fechasInicio, [key]: nuevaFecha };
+    setFechasInicio(nextFechas);
+    if (setSel.has(key)) {
+      notificarTiempoReal(seleccionados, empresasPorEstudiante, nextFechas, false);
+    }
   };
 
   const cambiarEmpresaEstudiante = (id, nuevaEmpresaId) => {
     const key = k(id);
     setError("");
     setMensajeExito("");
-    setEmpresasPorEstudiante((prev) => ({
-      ...prev,
-      [key]: nuevaEmpresaId,
-    }));
+    const nextEmpresas = { ...empresasPorEstudiante, [key]: nuevaEmpresaId };
+    setEmpresasPorEstudiante(nextEmpresas);
+    if (setSel.has(key)) {
+      notificarTiempoReal(seleccionados, nextEmpresas, fechasInicio, false);
+    }
   };
 
   const aplicarEmpresaBaseATodos = (empId) => {
+    setError("");
+    setMensajeExito("");
     setEmpresaBaseId(empId);
-    setEmpresasPorEstudiante((prev) => {
-      const next = { ...prev };
-      seleccionados.forEach((id) => {
-        next[k(id)] = empId;
-      });
-      return next;
+    const nextEmpresas = { ...empresasPorEstudiante };
+    seleccionados.forEach((id) => {
+      nextEmpresas[k(id)] = empId;
     });
+    setEmpresasPorEstudiante(nextEmpresas);
+    if (seleccionados.length > 0) {
+      notificarTiempoReal(seleccionados, nextEmpresas, fechasInicio, false);
+    }
   };
 
   const aplicarFechaBaseATodos = (nuevaFecha) => {
     if (!nuevaFecha) return;
-    setFechasInicio((prev) => {
-      const next = { ...prev };
-      seleccionados.forEach((id) => {
-        next[k(id)] = nuevaFecha;
-      });
-      return next;
+    setError("");
+    setMensajeExito("");
+    const nextFechas = { ...fechasInicio };
+    seleccionados.forEach((id) => {
+      nextFechas[k(id)] = nuevaFecha;
     });
+    setFechasInicio(nextFechas);
+    if (seleccionados.length > 0) {
+      notificarTiempoReal(seleccionados, empresasPorEstudiante, nextFechas, false);
+    }
   };
 
   const agregarVisibles = () => {
+    if (disponibles.length === 0) return;
     setError("");
     setMensajeExito("");
-    setSeleccionados((prev) => {
-      const ya = new Set(prev.map(k));
-      const nuevos = disponibles
-        .map((est) => k(obtenerIdEstudiante(est)))
-        .filter((idKey) => !ya.has(idKey));
-      return [...prev, ...nuevos];
+
+    const ya = new Set(seleccionados.map(k));
+    const nuevosIds = disponibles
+      .map((est) => k(obtenerIdEstudiante(est)))
+      .filter((idKey) => !ya.has(idKey));
+    if (nuevosIds.length === 0) return;
+
+    const nextIds = [...seleccionados, ...nuevosIds];
+    const nextFechas = { ...fechasInicio };
+    const nextEmpresas = { ...empresasPorEstudiante };
+
+    nuevosIds.forEach((idKey) => {
+      if (!nextFechas[idKey]) nextFechas[idKey] = fechaPorDefectoAnio;
+      if (!nextEmpresas[idKey]) {
+        nextEmpresas[idKey] = empresaBaseId ? k(empresaBaseId) : "";
+      }
     });
-    setFechasInicio((prev) => {
-      const next = { ...prev };
-      disponibles.forEach((est) => {
-        const key = k(obtenerIdEstudiante(est));
-        if (!next[key]) next[key] = fechaPorDefectoAnio;
-      });
-      return next;
-    });
-    setEmpresasPorEstudiante((prev) => {
-      const next = { ...prev };
-      disponibles.forEach((est) => {
-        const key = k(obtenerIdEstudiante(est));
-        if (next[key] === undefined)
-          next[key] = empresaBaseId ? k(empresaBaseId) : "";
-      });
-      return next;
-    });
+
+    setSeleccionados(nextIds);
+    setFechasInicio(nextFechas);
+    setEmpresasPorEstudiante(nextEmpresas);
+    notificarTiempoReal(nextIds, nextEmpresas, nextFechas, false);
   };
 
   const quitarVisibles = () => {
+    if (asignados.length === 0) return;
     setError("");
     setMensajeExito("");
-    const ids = new Set(asignados.map((e) => k(obtenerIdEstudiante(e))));
-    setSeleccionados((prev) => prev.filter((id) => !ids.has(k(id))));
+    const idsAQuitar = new Set(asignados.map((e) => k(obtenerIdEstudiante(e))));
+    const nextIds = seleccionados.filter((id) => !idsAQuitar.has(k(id)));
+    setSeleccionados(nextIds);
+    notificarTiempoReal(nextIds, empresasPorEstudiante, fechasInicio, false);
   };
 
   const guardarAsignacion = async () => {
@@ -1089,6 +1292,9 @@ export default function AsignarEstudiantes({
 
         return {
           id_estudiante: Number.isNaN(Number(id)) ? id : Number(id),
+          nombres: nombresDe(estObj) || nombreDe(estObj) || `Estudiante #${id}`,
+          apellidos: apellidosDe(estObj),
+          dni: dniDe(estObj),
           id_docente: idDocNum,
           id_docente_asesor: idDocNum,
           docente_responsable: nombreDoc,
@@ -1104,7 +1310,7 @@ export default function AsignarEstudiantes({
           empresa_nombre: empObj ? nombreEmpresaDe(empObj) : "",
           ubicacion: empObj ? ubicacionEmpresaDe(empObj) : "",
           fecha_inicio: fechasInicio[key] || fechaPorDefectoAnio,
-          periodo_academico: `${anio}`,
+          periodo_academico: `${anio}-II`,
           anio: Number(anio),
         };
       });
@@ -1120,6 +1326,7 @@ export default function AsignarEstudiantes({
             ? empresaBaseId
             : Number(empresaBaseId)
           : null,
+        periodo_academico: `${anio}-II`,
         anio: Number(anio),
         estudiantes: seleccionados.map((id) =>
           Number.isNaN(Number(id)) ? id : Number(id)
@@ -1156,6 +1363,9 @@ export default function AsignarEstudiantes({
       asignacionesDetalladas.forEach((item) => {
         const registroExpediente = {
           id_estudiante: item.id_estudiante,
+          nombres: item.nombres,
+          apellidos: item.apellidos,
+          dni: item.dni,
           id_docente: item.id_docente,
           id_docente_asesor: item.id_docente_asesor,
           docente_responsable: item.docente_responsable,
@@ -1182,26 +1392,27 @@ export default function AsignarEstudiantes({
         );
       });
 
-      clearApiCache();
-      window.dispatchEvent(
-        new CustomEvent("expediente:actualizado", {
-          detail: {
-            id_modulo: moduloId,
-            numero_modulo: numModuloActual,
-            nombre_modulo: nombreMod,
-            id_docente: docenteSeleccionadoId,
-            docente_responsable: nombreDoc,
-            anio: Number(anio),
-            asignaciones: asignacionesDetalladas,
-          },
-        })
-      );
+      invalidateApiCache("/asignaciones-asesores");
+      invalidateApiCache("/empresas");
+
+      const alcanceKey = `${k(docenteSeleccionadoId)}::${k(moduloId)}::${anio}`;
+      emitirEventoTiempoRealEmpresas({
+        alcanceKey,
+        id_modulo: moduloId,
+        numero_modulo: numModuloActual,
+        nombre_modulo: nombreMod,
+        id_docente: docenteSeleccionadoId,
+        docente_responsable: nombreDoc,
+        anio: Number(anio),
+        confirmadoServidor: true,
+        asignaciones: asignacionesDetalladas,
+      });
 
       setIdsIniciales([...seleccionados]);
       setFechasInicioIniciales({ ...fechasInicio });
       setEmpresasIniciales({ ...empresasPorEstudiante });
       setMensajeExito(
-        `Expediente y asesor guardados para ${nombreMod} (${anio}) · Asesor: ${nombreDoc}.`
+        `Expediente, empresa y asesor guardados para ${nombreMod} (${anio}) · Asesor: ${nombreDoc}.`
       );
       await onGuardadoExitoso?.();
     } catch (err) {
@@ -1281,11 +1492,11 @@ export default function AsignarEstudiantes({
         key={key}
         className={`flex items-center gap-3 border-b px-4 py-3 transition-colors last:border-b-0 ${t.borde} ${t.hover}`}
       >
-        <span
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${t.avatar}`}
-        >
-          {iniciales(nombre)}
-        </span>
+        <AvatarEstudiante
+          estudiante={est}
+          className="h-9 w-9 rounded-full text-xs font-bold"
+          fallbackClassName={t.avatar}
+        />
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -1307,7 +1518,7 @@ export default function AsignarEstudiantes({
           disabled={bloqueado}
           onClick={() => agregar(id)}
           aria-label={`Agregar ${nombre}`}
-          title="Asignar al módulo y expediente"
+          title="Asignar al módulo, empresa y expediente"
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 transition hover:bg-blue-600 hover:text-white disabled:opacity-40"
         >
           <Plus className="h-4 w-4" />
@@ -1331,11 +1542,11 @@ export default function AsignarEstudiantes({
         className={`flex flex-col gap-2.5 border-b px-4 py-3 transition-colors last:border-b-0 2xl:flex-row 2xl:items-center 2xl:justify-between ${t.borde} ${t.hover}`}
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <span
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${t.avatar}`}
-          >
-            {iniciales(nombre)}
-          </span>
+          <AvatarEstudiante
+            estudiante={est}
+            className="h-9 w-9 rounded-full text-xs font-bold"
+            fallbackClassName={t.avatar}
+          />
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -1443,7 +1654,7 @@ export default function AsignarEstudiantes({
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/10">
                   <FileCheck2 className="h-3.5 w-3.5" />
-                  Conectado al expediente
+                  Tiempo real con Empresas
                 </span>
               </div>
               <p className={`mt-0.5 text-xs ${t.texto2}`}>
@@ -1749,6 +1960,31 @@ export default function AsignarEstudiantes({
               setBusquedaAsig,
               "Buscar estudiantes asignados en este módulo"
             )}
+            <div
+              className="flex flex-wrap gap-2"
+              role="group"
+              aria-label="Filtrar estudiantes por empresa asignada"
+            >
+              {[
+                ["todos", "Todos", asignados.length],
+                ["con-empresa", "Con empresa", asignadosConEmpresa.length],
+                ["sin-empresa", "Sin empresa", asignadosSinEmpresa.length],
+              ].map(([clave, etiqueta, cantidad]) => (
+                <button
+                  key={clave}
+                  type="button"
+                  aria-pressed={filtroPracticas === clave}
+                  onClick={() => setFiltroPracticas(clave)}
+                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                    filtroPracticas === clave
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : `${t.borde} ${t.texto2} ${t.hover}`
+                  }`}
+                >
+                  {etiqueta} ({cantidad})
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className={`min-h-0 flex-1 overflow-y-auto ${t.panel}`}>
@@ -1771,8 +2007,18 @@ export default function AsignarEstudiantes({
                 "Sin resultados",
                 "Ningún estudiante en este módulo coincide con la búsqueda."
               )
+            ) : asignadosVisibles.length === 0 ? (
+              vacio(
+                Building2,
+                filtroPracticas === "con-empresa"
+                  ? "Sin estudiantes con empresa"
+                  : "Todos tienen empresa",
+                filtroPracticas === "con-empresa"
+                  ? "Asigna una empresa a un estudiante para marcarlo en práctica."
+                  : "No hay estudiantes pendientes de empresa en este módulo."
+              )
             ) : (
-              <ul>{asignados.map(filaAsignado)}</ul>
+              <ul>{asignadosVisibles.map(filaAsignado)}</ul>
             )}
           </div>
         </section>
