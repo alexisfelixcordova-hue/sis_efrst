@@ -49,6 +49,7 @@ class ExpedienteController extends Controller
         $camposExpediente = [
             'id_modulo',
             'id_empresa',
+            'id_representante_empresa',
             'id_docente_asesor',
             'periodo_academico',
             'estado_efsrt',
@@ -121,6 +122,23 @@ class ExpedienteController extends Controller
             foreach (['ruc', 'telefono', 'correo_electronico', 'direccion', 'supervisor_empresa_nombre'] as $campo) {
                 if (Schema::hasColumn('empresas_convenio', $campo)) {
                     $columnas[] = "emp.$campo as empresa_$campo";
+                }
+            }
+        }
+
+        if (
+            Schema::hasColumn('expediente_efsrt', 'id_representante_empresa')
+            && Schema::hasTable('empresa_representantes')
+        ) {
+            $query->leftJoin(
+                'empresa_representantes as rep',
+                'rep.id_representante_empresa',
+                '=',
+                'exp.id_representante_empresa'
+            );
+            foreach (['nombre', 'cargo', 'telefono', 'correo'] as $campo) {
+                if (Schema::hasColumn('empresa_representantes', $campo)) {
+                    $columnas[] = "rep.$campo as representante_empresa_$campo";
                 }
             }
         }

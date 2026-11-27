@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import api from "../../../api/axios.js";
+import { resolverUrlFotoUsuario } from "../../../utils/fotoUsuario.js";
 import AvatarEstudiante from "../../AvatarEstudiante.jsx";
 import {
   Mail, Phone, MapPin, Search, UserPlus, ArrowLeft, GraduationCap, LayoutGrid, Table2, FolderOpen,
   Users, Clock, CheckCircle2, AlertCircle, Building2, Armchair, Layers, Info,
 } from "lucide-react";
 
-const BASE_URL = "http://127.0.0.1:8000";
 const CAPACIDAD = 12;
 const MODULOS = [1, 2, 3];
 const ROMANO = { 0: "Sin módulo", 1: "Módulo I", 2: "Módulo II", 3: "Módulo III" };
@@ -35,19 +35,7 @@ const pestanas = [
 const iniciales = (n = "") => n.split(" ").slice(0, 2).map((p) => p[0]).join("").toUpperCase() || "?";
 
 const normalizarUrlFoto = (url) => {
-  if (!url || typeof url !== "string") return "";
-  const limpia = url.trim();
-  if (!limpia) return "";
-  if (
-    limpia.startsWith("http://") ||
-    limpia.startsWith("https://") ||
-    limpia.startsWith("data:") ||
-    limpia.startsWith("blob:")
-  ) {
-    return limpia;
-  }
-  const rutaLimpia = limpia.startsWith("/") ? limpia : `/${limpia}`;
-  return `${BASE_URL}${rutaLimpia}`;
+  return resolverUrlFotoUsuario(url);
 };
 
 const obtenerFotoDocente = (doc = {}, previo = {}) => {

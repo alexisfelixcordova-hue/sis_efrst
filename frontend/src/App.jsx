@@ -83,7 +83,7 @@ function App() {
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
 
   const [autenticado, setAutenticado] = useState(false);
-  const [cargandoSesion, setCargandoSesion] = useState(true);
+  const [cargandoSesion, setCargandoSesion] = useState(false);
   const [usuarioBD, setUsuarioBD] = useState(null);
 
   useEffect(() => {
@@ -101,58 +101,17 @@ function App() {
     return () => window.removeEventListener("keydown", cerrarConEscape);
   }, [menuMovilAbierto]);
 
-  const consultarPerfilBD = async (tokenOverride = null) => {
-    const token = tokenOverride || obtenerToken();
-    if (!token) return null;
-
-    const res = await api.get("/perfil", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = res.data;
-    if (!data.success || !data.data) {
-      return null;
+  useEffect(() => {
+    const token = obtenerToken();
+    if (token) {
+      api.post("/logout", {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch((error) => {
+        console.error("No se pudo cerrar la sesión anterior:", error);
+      });
     }
 
-    setUsuarioBD(data.data);
-    localStorage.setItem("user", JSON.stringify(data.data));
-    notificarCambioUsuario();
-    return data.data;
-  };
-
-  useEffect(() => {
-    const verificarSesionBD = async () => {
-      const token = obtenerToken();
-
-      if (!token) {
-        setAutenticado(false);
-        setUsuarioBD(null);
-        setCargandoSesion(false);
-        return;
-      }
-
-      try {
-        const perfil = await consultarPerfilBD(token);
-        if (perfil) {
-          await precargarDatosBase(perfil);
-          setAutenticado(true);
-        } else {
-          limpiarAlmacenamientoSesion();
-          setUsuarioBD(null);
-          notificarCambioUsuario();
-          setAutenticado(false);
-        }
-      } catch (error) {
-        console.error("Error al conectar con la base de datos:", error);
-        limpiarAlmacenamientoSesion();
-        setUsuarioBD(null);
-        notificarCambioUsuario();
-        setAutenticado(false);
-      } finally {
-        setCargandoSesion(false);
-      }
-    };
-
-    verificarSesionBD();
+    limpiarAlmacenamientoSesion();
   }, []);
 
   useEffect(() => {
@@ -495,13 +454,8 @@ function App() {
 
           if (data.access_token) {
             clearApiCache();
-            if (datos.recordar !== false) {
-              localStorage.setItem("token", data.access_token);
-              localStorage.setItem("access_token", data.access_token);
-            } else {
-              sessionStorage.setItem("token", data.access_token);
-              sessionStorage.setItem("access_token", data.access_token);
-            }
+            sessionStorage.setItem("token", data.access_token);
+            sessionStorage.setItem("access_token", data.access_token);
           }
 
           return data;

@@ -126,7 +126,7 @@ const RUTAS_RELACIONADAS = {
     'asignaciones-asesores': ['/asignaciones-asesores', '/docentes', '/mis-alumnos', '/expedientes', '/reportes', '/dashboard/resumen'],
     'mis-alumnos': ['/mis-alumnos', '/dashboard/resumen'],
     calendario: ['/calendario'],
-    usuarios: ['/usuarios', '/docentes', '/dashboard/resumen'],
+    usuarios: ['/usuarios', '/docentes', '/dashboard/resumen', '/perfil', '/auth/me', '/user'],
     perfil: ['/perfil', '/auth/me', '/user'],
     notificaciones: ['/notificaciones', '/notificaciones/preferencias'],
 };

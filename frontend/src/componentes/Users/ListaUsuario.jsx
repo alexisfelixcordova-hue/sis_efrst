@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import api from '../../api/axios.js';
-
-const BASE_URL = 'http://localhost:8000';
+import api, { getCachedData } from '../../api/axios.js';
+import { resolverUrlFotoUsuario } from '../../utils/fotoUsuario.js';
 const POR_PAGINA = 6;
 
 /* ---------- Animaciones (keyframes propios) ---------- */
@@ -67,22 +66,6 @@ const dominioDe = (correo) => {
     const partes = (correo || '').split('@');
     return partes.length > 1 ? partes[1].trim().toLowerCase() : 'sin dominio';
 };
-const resolverUrlFoto = (u) => {
-    const raw = u?.foto_perfil || u?.foto || u?.avatar || '';
-    if (!raw || typeof raw !== 'string' || !raw.trim()) return '';
-    const limpio = raw.trim();
-    if (
-        limpio.startsWith('http://') ||
-        limpio.startsWith('https://') ||
-        limpio.startsWith('data:') ||
-        limpio.startsWith('blob:')
-    ) {
-        return limpio;
-    }
-    const rutaLimpia = limpio.startsWith('/') ? limpio : `/${limpio}`;
-    return `${BASE_URL}${rutaLimpia}`;
-};
-
 // Usuario que tiene la sesión iniciada (el login lo guarda en localStorage como "user")
 const leerUsuarioActual = () => {
     try {
@@ -96,7 +79,7 @@ const leerUsuarioActual = () => {
 
 const AvatarUsuario = ({ usuario, className = 'w-10 h-10 text-xs' }) => {
     const [errorImagen, setErrorImagen] = useState(false);
-    const urlFoto = resolverUrlFoto(usuario);
+    const urlFoto = resolverUrlFotoUsuario(usuario);
 
     useEffect(() => {
         setErrorImagen(false);
@@ -252,17 +235,26 @@ const DonaRoles = ({ admins, docentes }) => {
     );
 };
 
-export default function ListaUsuario({ onIrCrear, onIrEditar }) {
-    const [usuarios, setUsuarios] = useState([]);
+const extraerUsuarios = (payload) =>
+    Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+
+export default function ListaUsuario({ onIrCrear }) {
+    const [usuarios, setUsuarios] = useState(() => extraerUsuarios(getCachedData('/usuarios')));
     const [busqueda, setBusqueda] = useState('');
     const [alerta, setAlerta] = useState({ mensaje: '', tipo: '' });
     const [filtroRol, setFiltroRol] = useState('todos');
-    const [cargando, setCargando] = useState(true);
+    const [cargando, setCargando] = useState(() => extraerUsuarios(getCachedData('/usuarios')).length === 0);
     const [orden, setOrden] = useState({ campo: 'nombres', dir: 'asc' });
     const [pagina, setPagina] = useState(1);
     const [usuarioActual, setUsuarioActual] = useState(leerUsuarioActual);
     const [confirmando, setConfirmando] = useState(null);
     const [eliminando, setEliminando] = useState(false);
+    const [usuarioEditando, setUsuarioEditando] = useState(null);
+    const [datosEdicion, setDatosEdicion] = useState(null);
+    const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+    const [fotoEdicion, setFotoEdicion] = useState(null);
+    const [fotoPreviewEdicion, setFotoPreviewEdicion] = useState('');
+
     useEffect(() => {
         cargarUsuarios();
     }, []);
@@ -270,6 +262,11 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
     useEffect(() => {
         setPagina(1);
     }, [busqueda, filtroRol]);
+
+    useEffect(() => {
+        if (!fotoPreviewEdicion.startsWith('blob:')) return undefined;
+        return () => URL.revokeObjectURL(fotoPreviewEdicion);
+    }, [fotoPreviewEdicion]);
 
     // Mantiene al día quién tiene la sesión iniciada
     useEffect(() => {
@@ -286,11 +283,19 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
 
     // Esc cierra la confirmación
     useEffect(() => {
-        if (!confirmando) return undefined;
-        const alTeclear = (e) => { if (e.key === 'Escape' && !eliminando) setConfirmando(null); };
+        if (!confirmando && !usuarioEditando) return undefined;
+        const alTeclear = (e) => {
+            if (e.key === 'Escape' && !eliminando && !guardandoEdicion) {
+                setConfirmando(null);
+                setUsuarioEditando(null);
+                setDatosEdicion(null);
+                setFotoEdicion(null);
+                setFotoPreviewEdicion('');
+            }
+        };
         window.addEventListener('keydown', alTeclear);
         return () => window.removeEventListener('keydown', alTeclear);
-    }, [confirmando, eliminando]);
+    }, [confirmando, eliminando, guardandoEdicion, usuarioEditando]);
 
     // ¿Esta fila es la cuenta con la que se inició sesión? (por ID y, como respaldo, por correo)
     const esUsuarioActual = (u) => {
@@ -303,11 +308,10 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
     const cargarUsuarios = async () => {
         try {
             const res = await api.get('/usuarios');
-            const datosFinales = Array.isArray(res.data) ? res.data : (res.data.data || []);
-            setUsuarios(datosFinales);
+            setUsuarios(extraerUsuarios(res.data));
         } catch (error) {
             mostrarAlerta('Error al cargar la lista de usuarios.', 'error');
-            setUsuarios([]);
+            if (usuarios.length === 0) setUsuarios([]);
         } finally {
             setCargando(false);
         }
@@ -349,10 +353,87 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
     };
 
     const editarUsuario = (u) => {
-        if (typeof onIrEditar === 'function') {
-            onIrEditar(u);
-        } else {
-            mostrarAlerta('La edición de usuarios estará disponible próximamente.', 'info');
+        setUsuarioEditando(u);
+        setFotoEdicion(null);
+        setFotoPreviewEdicion(resolverUrlFotoUsuario(u));
+        setDatosEdicion({
+            dni: u.dni || '',
+            nombres: u.nombres || '',
+            apellidos: u.apellidos || '',
+            correo: u.correo || '',
+            telefono: u.telefono || '',
+            id_rol: String(u.id_rol ?? 2),
+        });
+    };
+
+    const seleccionarFotoEdicion = (event) => {
+        const archivo = event.target.files?.[0];
+        event.target.value = '';
+        if (!archivo) return;
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(archivo.type)) {
+            mostrarAlerta('La foto debe estar en formato JPG, PNG o WebP.', 'error');
+            return;
+        }
+        if (archivo.size > 2 * 1024 * 1024) {
+            mostrarAlerta('La foto no debe superar los 2 MB.', 'error');
+            return;
+        }
+
+        setFotoEdicion(archivo);
+        setFotoPreviewEdicion(URL.createObjectURL(archivo));
+    };
+
+    const guardarEdicion = async (event) => {
+        event.preventDefault();
+        if (!usuarioEditando || !datosEdicion || guardandoEdicion) return;
+
+        setGuardandoEdicion(true);
+        try {
+            const datos = {
+                ...datosEdicion,
+                id_rol: esUsuarioActual(usuarioEditando)
+                    ? usuarioEditando.id_rol
+                    : Number(datosEdicion.id_rol),
+            };
+            const payload = new FormData();
+            Object.entries(datos).forEach(([campo, valor]) => payload.append(campo, valor ?? ''));
+            if (fotoEdicion) payload.append('foto', fotoEdicion);
+            payload.append('_method', 'PUT');
+
+            const response = await api.post(`/usuarios/${usuarioEditando.id_usuario}`, payload, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            const actualizado = response.data?.data || { ...usuarioEditando, ...datos };
+
+            setUsuarios((actuales) =>
+                actuales.map((usuario) =>
+                    String(usuario.id_usuario) === String(usuarioEditando.id_usuario)
+                        ? { ...usuario, ...actualizado }
+                        : usuario
+                )
+            );
+
+            if (esUsuarioActual(usuarioEditando)) {
+                const usuarioActualizado = { ...usuarioActual, ...actualizado };
+                localStorage.setItem('user', JSON.stringify(usuarioActualizado));
+                setUsuarioActual(usuarioActualizado);
+                window.dispatchEvent(new Event('usuario_actualizado'));
+                window.dispatchEvent(new Event('user-updated'));
+            }
+
+            setUsuarioEditando(null);
+            setDatosEdicion(null);
+            setFotoEdicion(null);
+            setFotoPreviewEdicion('');
+            mostrarAlerta('Usuario actualizado correctamente.', 'success');
+        } catch (error) {
+            const primerError = Object.values(error?.response?.data?.errors || {}).flat()[0];
+            mostrarAlerta(
+                primerError || error?.response?.data?.message || 'No se pudo actualizar el usuario.',
+                'error'
+            );
+        } finally {
+            setGuardandoEdicion(false);
         }
     };
 
@@ -818,6 +899,159 @@ export default function ListaUsuario({ onIrCrear, onIrEditar }) {
                     </div>
                 </div>
             </div>
+
+            {/* Edición de usuario */}
+            {usuarioEditando && datosEdicion && (
+                <div
+                    className="lu-fade fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm"
+                    onMouseDown={(e) => {
+                        if (e.target === e.currentTarget && !guardandoEdicion) {
+                            setUsuarioEditando(null);
+                            setDatosEdicion(null);
+                            setFotoEdicion(null);
+                            setFotoPreviewEdicion('');
+                        }
+                    }}
+                >
+                    <form
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="lu-edit-title"
+                        onSubmit={guardarEdicion}
+                        className="lu-modal w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+                    >
+                        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+                            <div>
+                                <h3 id="lu-edit-title" className="text-[16px] font-extrabold text-slate-900">
+                                    Editar usuario
+                                </h3>
+                                <p className="mt-1 text-[12px] text-slate-500">
+                                    Actualiza los datos de acceso y del docente.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={guardandoEdicion}
+                                onClick={() => {
+                                    setUsuarioEditando(null);
+                                    setDatosEdicion(null);
+                                    setFotoEdicion(null);
+                                    setFotoPreviewEdicion('');
+                                }}
+                                aria-label="Cerrar edición"
+                                className="rounded-lg px-2 py-1 text-xl leading-none text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div className="grid gap-4 p-6 sm:grid-cols-2">
+                            <div className="flex items-center gap-4 sm:col-span-2">
+                            <AvatarUsuario
+                                usuario={{ ...usuarioEditando, foto_perfil: fotoPreviewEdicion }}
+                                className="h-16 w-16 text-base"
+                            />
+                            <div>
+                                <p className="text-xs font-semibold text-slate-700">Foto de perfil</p>
+                                <label className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700">
+                                    {fotoEdicion ? 'Cambiar imagen seleccionada' : 'Seleccionar foto'}
+                                    <input
+                                        type="file"
+                                        accept="image/jpeg,image/png,image/webp"
+                                        onChange={seleccionarFotoEdicion}
+                                        className="sr-only"
+                                    />
+                                </label>
+                                <p className="mt-1 text-[11px] text-slate-400">JPG, PNG o WebP · máximo 2 MB</p>
+                            </div>
+                            </div>
+                            {[
+                                { key: 'dni', label: 'DNI', required: true, maxLength: 15 },
+                                { key: 'nombres', label: 'Nombres', required: true, maxLength: 100 },
+                                { key: 'apellidos', label: 'Apellidos', required: true, maxLength: 100 },
+                                { key: 'correo', label: 'Correo electrónico', required: true, type: 'email', maxLength: 150 },
+                                { key: 'telefono', label: 'Teléfono', required: false, maxLength: 20 },
+                            ].map((campo) => (
+                                <label
+                                    key={campo.key}
+                                    className={`space-y-1.5 text-xs font-semibold text-slate-700 ${
+                                        campo.key === 'correo' ? 'sm:col-span-2' : ''
+                                    }`}
+                                >
+                                    {campo.label}
+                                    <input
+                                        type={campo.type || 'text'}
+                                        required={campo.required}
+                                        maxLength={campo.maxLength}
+                                        inputMode={campo.key === 'dni' || campo.key === 'telefono' ? 'numeric' : undefined}
+                                        value={datosEdicion[campo.key]}
+                                        onChange={(e) =>
+                                            setDatosEdicion((actuales) => ({
+                                                ...actuales,
+                                                [campo.key]: e.target.value,
+                                            }))
+                                        }
+                                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                                    />
+                                </label>
+                            ))}
+                            <label className="space-y-1.5 text-xs font-semibold text-slate-700">
+                                Rol
+                                <select
+                                    value={datosEdicion.id_rol}
+                                    disabled={esUsuarioActual(usuarioEditando)}
+                                    onChange={(e) =>
+                                        setDatosEdicion((actuales) => ({
+                                            ...actuales,
+                                            id_rol: e.target.value,
+                                        }))
+                                    }
+                                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                                >
+                                    <option value="1">Administrador</option>
+                                    <option value="2">Docente</option>
+                                    {!['1', '2'].includes(String(usuarioEditando.id_rol)) && (
+                                        <option value={String(usuarioEditando.id_rol)}>
+                                            Rol actual ({usuarioEditando.id_rol})
+                                        </option>
+                                    )}
+                                </select>
+                                {esUsuarioActual(usuarioEditando) && (
+                                    <span className="block font-normal text-slate-400">
+                                        No puedes cambiar el rol de tu propia cuenta.
+                                    </span>
+                                )}
+                            </label>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 border-t border-slate-100 px-6 py-4">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setUsuarioEditando(null);
+                                    setDatosEdicion(null);
+                                    setFotoEdicion(null);
+                                    setFotoPreviewEdicion('');
+                                }}
+                                disabled={guardandoEdicion}
+                                className={`h-10 rounded-lg border border-slate-200 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 ${foco}`}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={guardandoEdicion}
+                                className={`flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70 ${foco}`}
+                            >
+                                {guardandoEdicion ? (
+                                    <>
+                                        <svg className="lu-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.55" /></svg>
+                                        Guardando…
+                                    </>
+                                ) : 'Guardar cambios'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
 
             {/* Confirmación de eliminación */}
             {confirmando && (

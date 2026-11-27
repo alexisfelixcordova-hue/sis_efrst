@@ -86,6 +86,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // ==========================================
     Route::get('/empresas/ruc/{ruc}', [EmpresaController::class, 'consultarRuc']);
     Route::get('/empresas/{id}/expedientes', [EmpresaController::class, 'expedientes']);
+    Route::post('/empresas/{id}/representantes', [EmpresaController::class, 'storeRepresentante']);
+    Route::put('/empresas/{id}/representantes/{idRepresentante}', [EmpresaController::class, 'updateRepresentante']);
+    Route::delete('/empresas/{id}/representantes/{idRepresentante}', [EmpresaController::class, 'destroyRepresentante']);
     Route::apiResource('empresas', EmpresaController::class);
 
     // Estudiantes

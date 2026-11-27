@@ -19,8 +19,7 @@ import {
 } from "lucide-react";
 import api, { getCachedData, invalidateApiCache } from "../../../api/axios";
 import AsignarEstudiantes from "./componentes/AsignarEstudiante";
-
-const BASE_URL = "http://localhost:8000";
+import { resolverUrlFotoUsuario } from "../../../utils/fotoUsuario.js";
 
 const avatares = [
   "https://i.pravatar.cc/80?img=47",
@@ -32,19 +31,7 @@ const avatares = [
 
 const resolverFotoDocente = (docente, index) => {
   const fallback = avatares[index % avatares.length];
-  const raw = docente?.foto_perfil || docente?.foto || docente?.avatar || "";
-  if (!raw || typeof raw !== "string" || !raw.trim()) return fallback;
-  const limpio = raw.trim();
-  if (
-    limpio.startsWith("http://") ||
-    limpio.startsWith("https://") ||
-    limpio.startsWith("data:") ||
-    limpio.startsWith("blob:")
-  ) {
-    return limpio;
-  }
-  const rutaLimpia = limpio.startsWith("/") ? limpio : `/${limpio}`;
-  return `${BASE_URL}${rutaLimpia}`;
+  return resolverUrlFotoUsuario(docente) || fallback;
 };
 
 const AvatarDocente = ({ docente, index, nombreCompleto, tam = "h-10 w-10" }) => {

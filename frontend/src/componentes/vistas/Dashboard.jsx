@@ -212,7 +212,7 @@ const normalizarDocente = (d = {}) => {
     d.modulo_nombre ||
     'Asesor EFSRT'
   const estado = d.status || d.estado || (d.activo === false ? 'En Revisión' : 'Activo')
-  const rawImg = d.img || d.foto_url || d.foto || d.avatar || ''
+  const rawImg = d.img || d.foto_perfil || d.usuario?.foto_perfil || d.foto_url || d.foto || d.avatar || ''
   const foto = urlFotoPublica(rawImg)
   const img =
     foto && !foto.includes('pravatar')

@@ -38,6 +38,12 @@ class Empresa extends Model
         return $this->hasMany(ExpedienteEfsrt::class, 'id_empresa', 'id_empresa');
     }
 
+    public function representantes()
+    {
+        return $this->hasMany(RepresentanteEmpresa::class, 'id_empresa', 'id_empresa')
+            ->orderBy('nombre');
+    }
+
     // Estudiantes practicantes a través de los expedientes de la empresa
     public function estudiantes()
     {

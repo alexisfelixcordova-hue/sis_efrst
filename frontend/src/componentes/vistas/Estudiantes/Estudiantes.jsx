@@ -1329,7 +1329,24 @@ export default function Estudiantes({ onVerEstudiante, darkMode = false }) {
     setModalAbierto(true);
   };
 
-  const handleGuardadoExitoso = () => {
+  const handleGuardadoExitoso = (estudianteGuardado) => {
+    if (estudianteGuardado?.id_estudiante) {
+      const idActualizado = idEstudianteDe(estudianteGuardado);
+      setEstudiantes((actuales) =>
+        actuales.map((estudiante) =>
+          idEstudianteDe(estudiante) === idActualizado
+            ? { ...estudiante, ...estudianteGuardado }
+            : estudiante
+        )
+      );
+      setEstudianteSeleccionado(estudianteGuardado);
+      setEstudianteRapido((actual) =>
+        actual && idEstudianteDe(actual) === idActualizado
+          ? { ...actual, ...estudianteGuardado }
+          : actual
+      );
+    }
+
     obtenerEstudiantes({ forzarRefresco: true });
     mostrarAlerta(
       estudianteSeleccionado

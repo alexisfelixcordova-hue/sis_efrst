@@ -169,19 +169,22 @@ export default function ModalEstudiante({
         payload.append("eliminar_foto", "1");
       }
 
+      let estudianteGuardado;
       if (estudianteActual) {
         // Laravel requiere _method = PUT cuando se envía FormData con archivos
         payload.append("_method", "PUT");
-        await api.post(`/estudiantes/${estudianteActual.id_estudiante}`, payload, {
+        const response = await api.post(`/estudiantes/${estudianteActual.id_estudiante}`, payload, {
           headers: { "Content-Type": "multipart/form-data" },
         });
+        estudianteGuardado = response.data?.data;
       } else {
-        await api.post("/estudiantes", payload, {
+        const response = await api.post("/estudiantes", payload, {
           headers: { "Content-Type": "multipart/form-data" },
         });
+        estudianteGuardado = response.data?.data;
       }
 
-      onGuardadoExitoso?.();
+      onGuardadoExitoso?.(estudianteGuardado);
       onClose();
     } catch (err) {
       console.error("Error al guardar estudiante:", err);

@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Empresa; // <-- En singular
+use App\Models\RepresentanteEmpresa;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class EmpresaController extends Controller
 {
@@ -32,6 +35,7 @@ class EmpresaController extends Controller
                     'direccion',
                 ])
                 ->with(['estudiantes:id_estudiante,nombres,apellidos,dni'])
+                ->with('representantes')
                 ->orderByDesc('id_empresa')
                 ->get();
             return response()->json($empresas, 200);
@@ -63,7 +67,19 @@ class EmpresaController extends Controller
             'ubigeo' => 'nullable|string|max:6',
         ]);
 
-        $empresa = Empresa::create($datos);
+        $empresa = DB::transaction(function () use ($datos) {
+            $empresa = Empresa::create($datos);
+            if (!empty($datos['supervisor_empresa_nombre'])) {
+                $empresa->representantes()->create([
+                    'nombre' => $datos['supervisor_empresa_nombre'],
+                    'cargo' => $datos['supervisor_empresa_cargo'] ?? null,
+                    'telefono' => $datos['telefono'] ?? null,
+                    'correo' => $datos['correo_electronico'] ?? null,
+                ]);
+            }
+
+            return $empresa->load('representantes');
+        });
 
         return response()->json([
             'message' => 'Empresa de convenio registrada exitosamente',
@@ -84,6 +100,69 @@ class EmpresaController extends Controller
         return response()->json([
             'message' => 'Empresa de convenio eliminada correctamente'
         ], 200);
+    }
+
+    public function storeRepresentante(Request $request, $id)
+    {
+        $empresa = Empresa::where('id_empresa', $id)->firstOrFail();
+        $datos = $request->validate([
+            'nombre' => 'required|string|max:150',
+            'cargo' => 'nullable|string|max:100',
+            'telefono' => 'nullable|string|max:50',
+            'correo' => 'nullable|email|max:150',
+        ]);
+
+        $representante = $empresa->representantes()->create($datos);
+
+        return response()->json([
+            'message' => 'Contacto agregado a la empresa.',
+            'data' => $representante,
+        ], 201);
+    }
+
+    public function updateRepresentante(Request $request, $id, $idRepresentante)
+    {
+        $representante = RepresentanteEmpresa::query()
+            ->where('id_empresa', $id)
+            ->where('id_representante_empresa', $idRepresentante)
+            ->firstOrFail();
+
+        $datos = $request->validate([
+            'nombre' => 'required|string|max:150',
+            'cargo' => 'nullable|string|max:100',
+            'telefono' => 'nullable|string|max:50',
+            'correo' => 'nullable|email|max:150',
+        ]);
+        $representante->update($datos);
+
+        return response()->json([
+            'message' => 'Contacto actualizado.',
+            'data' => $representante->fresh(),
+        ]);
+    }
+
+    public function destroyRepresentante($id, $idRepresentante)
+    {
+        $representante = RepresentanteEmpresa::query()
+            ->where('id_empresa', $id)
+            ->where('id_representante_empresa', $idRepresentante)
+            ->firstOrFail();
+
+        if (
+            Schema::hasTable('expediente_efsrt')
+            && Schema::hasColumn('expediente_efsrt', 'id_representante_empresa')
+            && DB::table('expediente_efsrt')
+                ->where('id_representante_empresa', $representante->id_representante_empresa)
+                ->exists()
+        ) {
+            return response()->json([
+                'message' => 'No se puede eliminar un contacto asignado a un expediente.',
+            ], 422);
+        }
+
+        $representante->delete();
+
+        return response()->json(['message' => 'Contacto eliminado.']);
     }
 
     public function consultarRuc($ruc)

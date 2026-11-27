@@ -14,8 +14,8 @@ import {
   normalizarNombreModulo,
   publicarModuloSistema,
 } from '../../utils/moduloSistema.js';
+import { resolverUrlFotoUsuario as resolverFotoUsuario } from '../../utils/fotoUsuario.js';
 
-const BASE_URL = 'http://localhost:8000';
 const API_URL = 'http://localhost:8000/api';
 
 // Ajusta estas rutas a tu API de Laravel
@@ -149,14 +149,7 @@ const obtenerRolEtiqueta = (u) => {
 };
 
 const resolverUrlFotoUsuario = (u) => {
-  const raw = u?.foto_perfil || u?.foto || u?.avatar || '';
-  if (!raw || typeof raw !== 'string' || raw.trim() === '') return imagenPerfil;
-  const limpio = raw.trim();
-  if (limpio.startsWith('http://') || limpio.startsWith('https://') || limpio.startsWith('data:') || limpio.startsWith('blob:')) {
-    return limpio;
-  }
-  const rutaLimpia = limpio.startsWith('/') ? limpio : `/${limpio}`;
-  return `${BASE_URL}${rutaLimpia}`;
+  return resolverFotoUsuario(u) || imagenPerfil;
 };
 
 // Datos editables, normalizados (los nombres de campo cambian según el endpoint)

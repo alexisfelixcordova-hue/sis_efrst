@@ -16,6 +16,7 @@ class ExpedienteEfsrt extends Model
         'id_estudiante',
         'id_modulo',
         'id_empresa',
+        'id_representante_empresa',
         'fecha_inicio',
         'id_docente_asesor',
         'horas_acumuladas',
@@ -39,6 +40,15 @@ class ExpedienteEfsrt extends Model
     public function empresa()
     {
         return $this->belongsTo(Empresa::class, 'id_empresa', 'id_empresa');
+    }
+
+    public function representanteEmpresa()
+    {
+        return $this->belongsTo(
+            RepresentanteEmpresa::class,
+            'id_representante_empresa',
+            'id_representante_empresa'
+        );
     }
 
     public function evidencias()

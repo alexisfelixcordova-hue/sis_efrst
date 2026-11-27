@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import perfilDefault from "../../../assets/perfil.jpg"; // ← ajustado: el archivo ahora está una carpeta más adentro
+import api from "../../../api/axios.js";
+import { resolverUrlFotoUsuario as resolverUrlFoto } from "../../../utils/fotoUsuario.js";
 import {
   Save, BadgeCheck, GraduationCap, Mail, Camera, Contact, User, Lock, ShieldCheck,
   Bell, History, Pencil, UserCog, AtSign, MailCheck, Phone, Briefcase, ChevronDown, Image as ImageIcon,
@@ -18,9 +20,6 @@ const TABS = [
   { id: "notif", label: "Notificaciones y Alertas", icon: Bell, badge: 4 },
   { id: "hist", label: "Historial de Actividad", icon: History },
 ];
-
-const API = "http://localhost:8000/api"; // ← mismo valor que en App.jsx
-const BASE_URL = "http://localhost:8000";
 
 const SEDES = ["Campus Central - Av. Los Libertadores", "Sede Norte", "Sede Sur"];
 
@@ -67,22 +66,6 @@ const esRutaFotoPersistente = (valor) => {
   );
 };
 
-const resolverUrlFoto = (fotoValor) => {
-  if (!fotoValor || typeof fotoValor !== "string") return "";
-  const limpio = fotoValor.trim();
-  if (!limpio) return "";
-  if (
-    limpio.startsWith("http://") ||
-    limpio.startsWith("https://") ||
-    limpio.startsWith("data:") ||
-    limpio.startsWith("blob:")
-  ) {
-    return limpio;
-  }
-  const rutaLimpia = limpio.startsWith("/") ? limpio : `/${limpio}`;
-  return `${BASE_URL}${rutaLimpia}`;
-};
-
 const notificarUsuarioActualizado = (usuarioObj) => {
   try {
     const actual = JSON.parse(localStorage.getItem("user") || "{}");
@@ -104,7 +87,7 @@ const obtenerCargoPorRol = (idRol, fallback = "Coordinador EFSRT") => {
   return fallback;
 };
 
-export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar }) {
+export default function Perfil({ foto = perfilDefault, usuario, onGuardar }) {
   const storageData = JSON.parse(localStorage.getItem("user") || "{}");
   const userActive = desempaquetarUsuario(usuario || storageData);
   const inputFotoRef = useRef(null);
@@ -134,14 +117,8 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
   const [estado, setEstado] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("token") || localStorage.getItem("access_token");
-    if (!token) return;
-
-    fetch(`${API}/perfil`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((payload) => {
+    api.get("/perfil")
+      .then(({ data: payload }) => {
         const rawUser = desempaquetarUsuario(payload);
         if (!rawUser || Object.keys(rawUser).length === 0) return;
         const { contrasena_hash, ...u } = rawUser;
@@ -169,7 +146,7 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
           cargo: obtenerCargoPorRol(u.id_rol ?? u.rol_id, d.cargo),
         }));
       })
-      .catch((e) => console.warn("No se pudo cargar el perfil:", e));
+      .catch((error) => console.warn("No se pudo cargar el perfil:", error));
   }, []);
 
   const cambiar = (k) => (e) => setDatos({ ...datos, [k]: e.target.value });
@@ -194,36 +171,28 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
     }
 
     const previewLocal = URL.createObjectURL(archivo);
+    const fotoAnterior = fotoPerfil;
     setFotoPerfil(previewLocal);
     setSinFoto(false);
     setSubiendoFoto(true);
     setEstado("Subiendo foto...");
 
     try {
-      const token = localStorage.getItem("token") || localStorage.getItem("access_token");
       const formData = new FormData();
       formData.append("foto", archivo);
 
       const endpointFoto = idUsuarioActual
-        ? `${API}/usuarios/${idUsuarioActual}/foto`
-        : `${API}/perfil/foto`;
-
-      const res = await fetch(endpointFoto, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: formData,
+        ? `/usuarios/${idUsuarioActual}/foto`
+        : "/perfil/foto";
+      const { data } = await api.post(endpointFoto, formData, {
+        headers: { Accept: "application/json", "Content-Type": "multipart/form-data" },
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const errores = data.errors ? Object.values(data.errors).flat().join(" ") : "";
-        throw new Error(errores || data.message || "No se pudo guardar la foto en el servidor");
+      const rutaGuardada = data.foto_perfil || data.data?.foto_perfil;
+      if (!rutaGuardada) {
+        throw new Error("El servidor no devolvió la ruta de la foto guardada.");
       }
-
-      const rutaGuardada = data.foto_perfil || data.foto_url || data.data?.foto_perfil || previewLocal;
+      URL.revokeObjectURL(previewLocal);
       setFotoPerfil(rutaGuardada);
       setSinFoto(false);
 
@@ -235,7 +204,14 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
 
       setEstado("Foto de perfil actualizada");
     } catch (err) {
-      setEstado(err.message || "Vista previa cargada (revisa el endpoint de foto)");
+      URL.revokeObjectURL(previewLocal);
+      setFotoPerfil(fotoAnterior);
+      setEstado(
+        Object.values(err?.response?.data?.errors || {}).flat()[0] ||
+          err?.response?.data?.message ||
+          err.message ||
+          "No se pudo guardar la foto en el servidor."
+      );
     } finally {
       setSubiendoFoto(false);
       e.target.value = "";
@@ -246,7 +222,6 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
   const guardar = async () => {
     setEstado("Guardando...");
     try {
-      const token = localStorage.getItem("token") || localStorage.getItem("access_token");
       const cuerpo = {
         nombres: datos.nombres,
         apellidos: datos.apellidos,
@@ -258,20 +233,7 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
         ...(esRutaFotoPersistente(fotoPerfil) ? { foto_perfil: fotoPerfil } : {}),
       };
 
-      const res = await fetch(`${API}/perfil`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(cuerpo),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const errores = data.errors ? Object.values(data.errors).flat().join(" ") : "";
-        throw new Error(errores || data.message || "No se pudo guardar");
-      }
+      const { data } = await api.put("/perfil", cuerpo);
 
       const usuarioNuevo = desempaquetarUsuario(data);
       const fotoFinal =
@@ -342,7 +304,15 @@ export default function Perfil({ foto = "/images/perfil.jpg", usuario, onGuardar
         <div className="flex flex-wrap items-start gap-y-2 px-3 sm:px-[18px]">
           <div
             onClick={() => inputFotoRef.current?.click()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                inputFotoRef.current?.click();
+              }
+            }}
             title="Haz clic para cambiar tu foto de perfil"
+            role="button"
+            tabIndex={0}
             className="relative shrink-0 w-[56px] h-[56px] -mt-[23px] rounded-[10px] border-2 border-white bg-slate-300 shadow-md cursor-pointer group"
           >
             {sinFoto || !srcAvatar ? (

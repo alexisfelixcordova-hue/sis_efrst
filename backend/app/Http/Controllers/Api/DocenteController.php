@@ -214,6 +214,9 @@ class DocenteController extends Controller
                     $columnas[] = "exp.$columna";
                 }
             }
+            if ($this->existeColumna('expediente_efsrt', 'id_representante_empresa')) {
+                $columnas[] = 'exp.id_representante_empresa';
+            }
         }
 
         if ($this->existeTabla('empresas_convenio') && ($tieneEmpresaExpediente || $tieneEmpresaAsignacion)) {
@@ -239,6 +242,24 @@ class DocenteController extends Controller
                     $columnas[] = $columna === $alias
                         ? "emp.$columna"
                         : "emp.$columna as $alias";
+                }
+            }
+        }
+
+        if (
+            $tieneExpedientes
+            && $this->existeColumna('expediente_efsrt', 'id_representante_empresa')
+            && $this->existeTabla('empresa_representantes')
+        ) {
+            $query->leftJoin(
+                'empresa_representantes as rep',
+                'rep.id_representante_empresa',
+                '=',
+                'exp.id_representante_empresa'
+            );
+            foreach (['nombre', 'cargo', 'telefono', 'correo'] as $columna) {
+                if ($this->existeColumna('empresa_representantes', $columna)) {
+                    $columnas[] = "rep.$columna as representante_empresa_$columna";
                 }
             }
         }
@@ -279,6 +300,7 @@ class DocenteController extends Controller
             'asignaciones'      => 'sometimes|array',
             'asignaciones.*.id_estudiante' => 'required_with:asignaciones|integer|distinct',
             'asignaciones.*.id_empresa'    => 'nullable|integer|exists:empresas_convenio,id_empresa',
+            'asignaciones.*.id_representante_empresa' => 'nullable|integer|exists:empresa_representantes,id_representante_empresa',
             'asignaciones.*.fecha_inicio' => 'nullable|date',
         ], [
             'id_modulo.required' => 'Debes seleccionar un módulo profesional.',
@@ -305,6 +327,10 @@ class DocenteController extends Controller
             ->mapWithKeys(fn ($asignacion) => [
                 (string) $asignacion['id_estudiante'] => $asignacion['id_empresa'] ?? null,
             ]);
+        $representantesPorEstudiante = collect($validated['asignaciones'] ?? [])
+            ->mapWithKeys(fn ($asignacion) => [
+                (string) $asignacion['id_estudiante'] => $asignacion['id_representante_empresa'] ?? null,
+            ]);
         $fechasInicioPorEstudiante = collect($validated['asignaciones'] ?? [])
             ->mapWithKeys(fn ($asignacion) => [
                 (string) $asignacion['id_estudiante'] => $asignacion['fecha_inicio'] ?? null,
@@ -316,14 +342,47 @@ class DocenteController extends Controller
             && $this->existeColumna('expediente_efsrt', 'id_empresa')
             && $this->existeColumna('expediente_efsrt', 'id_estudiante')
             && $this->existeColumna('expediente_efsrt', 'id_modulo');
+        $tieneRepresentanteExpediente = $tieneTablaExpediente
+            && $this->existeColumna('expediente_efsrt', 'id_representante_empresa');
 
         $hayEmpresasAsignadas = $idsEstudiantes && collect($idsEstudiantes)->contains(
             fn ($idEstudiante) => $empresasPorEstudiante->get((string) $idEstudiante, $empresaPredeterminada) !== null
+        );
+        $hayRepresentantesAsignados = $idsEstudiantes && collect($idsEstudiantes)->contains(
+            fn ($idEstudiante) => $representantesPorEstudiante->get((string) $idEstudiante) !== null
         );
         if ($hayEmpresasAsignadas && !$tieneEmpresaAsignacion && !$tieneEmpresaExpediente) {
             throw ValidationException::withMessages([
                 'asignaciones' => 'La base de datos no permite guardar la empresa vinculada al expediente.',
             ]);
+        }
+        if ($hayRepresentantesAsignados && !$tieneRepresentanteExpediente) {
+            throw ValidationException::withMessages([
+                'asignaciones' => 'La base de datos no permite guardar el representante del expediente.',
+            ]);
+        }
+        if ($hayRepresentantesAsignados && !$tieneEmpresaExpediente) {
+            throw ValidationException::withMessages([
+                'asignaciones' => 'El expediente debe permitir guardar la empresa para asignar un representante.',
+            ]);
+        }
+        foreach ($validated['asignaciones'] ?? [] as $asignacion) {
+            $idRepresentante = $asignacion['id_representante_empresa'] ?? null;
+            if ($idRepresentante === null) {
+                continue;
+            }
+
+            $idEmpresa = $asignacion['id_empresa'] ?? $empresaPredeterminada;
+            $contactoPerteneceAEmpresa = $idEmpresa !== null
+                && DB::table('empresa_representantes')
+                    ->where('id_representante_empresa', $idRepresentante)
+                    ->where('id_empresa', $idEmpresa)
+                    ->exists();
+            if (!$contactoPerteneceAEmpresa) {
+                throw ValidationException::withMessages([
+                    'asignaciones' => 'El representante seleccionado debe pertenecer a la empresa asignada al estudiante.',
+                ]);
+            }
         }
 
         $asignacionesPrevias = DB::table('asignacion_asesores')
@@ -443,6 +502,10 @@ class DocenteController extends Controller
                     }
 
                     $datosExpediente = ['id_empresa' => $empresaId];
+                    if ($tieneRepresentanteExpediente) {
+                        $datosExpediente['id_representante_empresa'] =
+                            $representantesPorEstudiante->get((string) $idEstudiante);
+                    }
                     $fechaInicio = $fechasInicioPorEstudiante->get((string) $idEstudiante);
                     if ($fechaInicio && $this->existeColumna('expediente_efsrt', 'fecha_inicio')) {
                         $datosExpediente['fecha_inicio'] = $fechaInicio;

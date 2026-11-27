@@ -321,6 +321,14 @@ export default function Empresas() {
     const [mostrarForm, setMostrarForm] = useState(false);
     const [selId, setSelId] = useState(null);
     const [copiado, setCopiado] = useState(false);
+    const [representanteEditandoId, setRepresentanteEditandoId] = useState(null);
+    const [representanteForm, setRepresentanteForm] = useState({
+        nombre: '',
+        cargo: '',
+        telefono: '',
+        correo: '',
+    });
+    const [guardandoRepresentante, setGuardandoRepresentante] = useState(false);
     const [busqueda, setBusqueda] = useState('');
     const [filtro, setFiltro] = useState('todas');
     const [orden, setOrden] = useState({ campo: 'razon_social', dir: 'asc' });
@@ -632,7 +640,13 @@ export default function Empresas() {
     };
 
     const abrirForm = () => { setSelId(null); setMostrarForm(true); };
-    const abrirFicha = (id) => { setMostrarForm(false); setSelId(id); setCopiado(false); };
+    const abrirFicha = (id) => {
+        setMostrarForm(false);
+        setSelId(id);
+        setCopiado(false);
+        setRepresentanteEditandoId(null);
+        setRepresentanteForm({ nombre: '', cargo: '', telefono: '', correo: '' });
+    };
     const copiarRuc = (ruc) => {
         try { navigator.clipboard?.writeText(String(ruc)); } catch (e) { /* sin permiso de portapapeles */ }
         setCopiado(true);
@@ -653,6 +667,74 @@ export default function Empresas() {
     const ea = estilosAlerta[alerta.tipo] || estilosAlerta.error;
     const rucCompleto = formData.ruc.length === 11;
     const selEmp = selId !== null ? lista.find(e => e.id_empresa === selId) : null;
+
+    const actualizarRepresentantesEmpresa = (representantes) => {
+        const actualizadas = lista.map((empresa) =>
+            empresa.id_empresa === selId ? { ...empresa, representantes } : empresa
+        );
+        setEmpresas(actualizadas);
+        guardarCache(CACHE_EMPRESAS, actualizadas);
+        invalidateApiCache('/empresas');
+        const empresaActualizada = actualizadas.find((empresa) => empresa.id_empresa === selId);
+        window.dispatchEvent(new CustomEvent('empresas:actualizada', {
+            detail: { empresa: empresaActualizada },
+        }));
+    };
+
+    const guardarRepresentante = async (e) => {
+        e.preventDefault();
+        if (!selEmp) return;
+        setGuardandoRepresentante(true);
+        try {
+            const ruta = `/empresas/${selEmp.id_empresa}/representantes`;
+            const respuesta = representanteEditandoId
+                ? await api.put(`${ruta}/${representanteEditandoId}`, representanteForm)
+                : await api.post(ruta, representanteForm);
+            const contacto = respuesta.data?.data;
+            const existentes = selEmp.representantes || [];
+            const representantes = representanteEditandoId
+                ? existentes.map((item) =>
+                    String(item.id_representante_empresa) === String(representanteEditandoId)
+                        ? contacto
+                        : item
+                )
+                : [...existentes, contacto].sort((a, b) => a.nombre.localeCompare(b.nombre));
+            actualizarRepresentantesEmpresa(representantes);
+            setRepresentanteForm({ nombre: '', cargo: '', telefono: '', correo: '' });
+            setRepresentanteEditandoId(null);
+            mostrarAlerta('Contacto de empresa guardado.', 'success');
+        } catch (error) {
+            const errores = error.response?.data?.errors;
+            const primerError = errores ? Object.values(errores).flat()[0] : null;
+            mostrarAlerta(
+                primerError || error.response?.data?.message || 'No se pudo guardar el contacto.',
+                'error'
+            );
+        } finally {
+            setGuardandoRepresentante(false);
+        }
+    };
+
+    const eliminarRepresentante = async (representante) => {
+        if (!selEmp) return;
+        if (!window.confirm(`¿Eliminar a ${representante.nombre} de los contactos de esta empresa?`)) return;
+        try {
+            await api.delete(
+                `/empresas/${selEmp.id_empresa}/representantes/${representante.id_representante_empresa}`
+            );
+            actualizarRepresentantesEmpresa(
+                (selEmp.representantes || []).filter(
+                    (item) => item.id_representante_empresa !== representante.id_representante_empresa
+                )
+            );
+            mostrarAlerta('Contacto eliminado.', 'success');
+        } catch (error) {
+            mostrarAlerta(
+                error.response?.data?.message || 'No se pudo eliminar el contacto.',
+                'error'
+            );
+        }
+    };
 
     const paso1 = rucCompleto && !!formData.razon_social;
     const paso2 = !!(formData.direccion || formData.distrito || formData.departamento);
@@ -1047,6 +1129,115 @@ export default function Empresas() {
                                     </div>
                                 ))}
                             </div>
+                        </section>
+
+                        <section className="space-y-4 border-t border-slate-100 pt-6">
+                            <div>
+                                <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Contactos para expedientes</h3>
+                                <p className="mt-1 text-xs text-slate-500">Elige uno de estos contactos al asignar la empresa a cada estudiante.</p>
+                            </div>
+                            <div className="space-y-2">
+                                {(selEmp.representantes || []).map((representante) => (
+                                    <div key={representante.id_representante_empresa} className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 p-3">
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-semibold text-slate-800">{representante.nombre}</p>
+                                            <p className="text-xs text-slate-500">{representante.cargo || 'Sin cargo registrado'}</p>
+                                            <p className="mt-1 break-all text-xs text-slate-500">
+                                                {[representante.telefono, representante.correo].filter(Boolean).join(' · ') || 'Sin teléfono ni correo'}
+                                            </p>
+                                        </div>
+                                        <div className="flex shrink-0 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setRepresentanteEditandoId(representante.id_representante_empresa);
+                                                    setRepresentanteForm({
+                                                        nombre: representante.nombre || '',
+                                                        cargo: representante.cargo || '',
+                                                        telefono: representante.telefono || '',
+                                                        correo: representante.correo || '',
+                                                    });
+                                                }}
+                                                className="text-xs font-semibold text-blue-700 hover:underline"
+                                            >
+                                                Editar
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => eliminarRepresentante(representante)}
+                                                className="text-xs font-semibold text-rose-600 hover:underline"
+                                            >
+                                                Eliminar
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                                {(selEmp.representantes || []).length === 0 && (
+                                    <p className="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-500">Aún no hay contactos registrados para los expedientes.</p>
+                                )}
+                            </div>
+                            <form onSubmit={guardarRepresentante} className="space-y-3 rounded-xl bg-slate-50 p-4">
+                                <p className="text-xs font-semibold text-slate-700">
+                                    {representanteEditandoId ? 'Editar contacto' : 'Agregar contacto'}
+                                </p>
+                                <input
+                                    value={representanteForm.nombre}
+                                    onChange={(e) => setRepresentanteForm((prev) => ({ ...prev, nombre: e.target.value }))}
+                                    placeholder="Nombre completo"
+                                    aria-label="Nombre del contacto"
+                                    required
+                                    maxLength={150}
+                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                />
+                                <input
+                                    value={representanteForm.cargo}
+                                    onChange={(e) => setRepresentanteForm((prev) => ({ ...prev, cargo: e.target.value }))}
+                                    placeholder="Cargo"
+                                    aria-label="Cargo del contacto"
+                                    maxLength={100}
+                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                />
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <input
+                                        value={representanteForm.telefono}
+                                        onChange={(e) => setRepresentanteForm((prev) => ({ ...prev, telefono: e.target.value }))}
+                                        placeholder="Teléfono"
+                                        aria-label="Teléfono del contacto"
+                                        maxLength={50}
+                                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    />
+                                    <input
+                                        type="email"
+                                        value={representanteForm.correo}
+                                        onChange={(e) => setRepresentanteForm((prev) => ({ ...prev, correo: e.target.value }))}
+                                        placeholder="Correo"
+                                        aria-label="Correo del contacto"
+                                        maxLength={150}
+                                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    />
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                    {representanteEditandoId && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setRepresentanteEditandoId(null);
+                                                setRepresentanteForm({ nombre: '', cargo: '', telefono: '', correo: '' });
+                                            }}
+                                            className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-white"
+                                        >
+                                            Cancelar
+                                        </button>
+                                    )}
+                                    <button
+                                        type="submit"
+                                        disabled={guardandoRepresentante}
+                                        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                                    >
+                                        {guardandoRepresentante ? 'Guardando…' : representanteEditandoId ? 'Guardar cambios' : 'Agregar contacto'}
+                                    </button>
+                                </div>
+                            </form>
                         </section>
 
                         <section className="space-y-3 border-t border-slate-100 pt-6">

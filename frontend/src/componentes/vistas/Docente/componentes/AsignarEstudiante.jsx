@@ -489,6 +489,8 @@ export default function AsignarEstudiantes({
   const [fechasInicioIniciales, setFechasInicioIniciales] = useState({});
   const [empresasPorEstudiante, setEmpresasPorEstudiante] = useState({});
   const [empresasIniciales, setEmpresasIniciales] = useState({});
+  const [representantesPorEstudiante, setRepresentantesPorEstudiante] = useState({});
+  const [representantesIniciales, setRepresentantesIniciales] = useState({});
 
   const [vista, setVista] = useState("asignados");
   const [filtroPracticas, setFiltroPracticas] = useState("todos");
@@ -716,6 +718,8 @@ export default function AsignarEstudiantes({
     setFechasInicioIniciales(snap.fechas);
     setEmpresasPorEstudiante(snap.empresas);
     setEmpresasIniciales(snap.empresas);
+    setRepresentantesPorEstudiante(snap.representantes || {});
+    setRepresentantesIniciales(snap.representantes || {});
   };
 
   const construirSnapshotDesdeLocal = (
@@ -742,6 +746,7 @@ export default function AsignarEstudiantes({
 
     const mapaFechas = {};
     const mapaEmpresas = {};
+    const mapaRepresentantes = {};
 
     ids.forEach((idKey) => {
       const est = previosDelDocente.find(
@@ -763,6 +768,12 @@ export default function AsignarEstudiantes({
         empresaBaseId ??
         "";
       mapaEmpresas[idKey] = empId ? k(empId) : "";
+      const representanteId =
+        est?.id_representante_empresa ??
+        est?.representante_empresa_id ??
+        guardada?.id_representante_empresa ??
+        "";
+      mapaRepresentantes[idKey] = representanteId ? k(representanteId) : "";
     });
 
     return {
@@ -770,6 +781,7 @@ export default function AsignarEstudiantes({
       objetos: previosDelDocente,
       fechas: mapaFechas,
       empresas: mapaEmpresas,
+      representantes: mapaRepresentantes,
     };
   };
 
@@ -790,6 +802,10 @@ export default function AsignarEstudiantes({
           typeof raw === "object" &&
           raw !== null &&
           Object.prototype.hasOwnProperty.call(raw, "id_empresa");
+          const tieneRepresentanteEnRespuesta =
+            typeof raw === "object" &&
+            raw !== null &&
+            Object.prototype.hasOwnProperty.call(raw, "id_representante_empresa");
         combinadosMap.set(k(idEst), {
           ...previo,
           ...baseAlumno,
@@ -805,6 +821,11 @@ export default function AsignarEstudiantes({
               raw?.pivot?.id_empresa ??
               baseAlumno?.id_empresa ??
               previo?.id_empresa,
+          id_representante_empresa: tieneRepresentanteEnRespuesta
+            ? raw.id_representante_empresa
+            : raw?.representante_empresa_id ??
+              baseAlumno?.id_representante_empresa ??
+              previo?.id_representante_empresa,
         });
       }
     });
@@ -812,6 +833,7 @@ export default function AsignarEstudiantes({
     const ids = Array.from(combinadosMap.keys());
     const mapaFechas = { ...localSnap.fechas };
     const mapaEmpresas = { ...localSnap.empresas };
+    const mapaRepresentantes = { ...localSnap.representantes };
 
     ids.forEach((idKey) => {
       const item = combinadosMap.get(idKey);
@@ -834,6 +856,11 @@ export default function AsignarEstudiantes({
           "";
         mapaEmpresas[idKey] = empId ? k(empId) : "";
       }
+      if (item?.id_representante_empresa != null) {
+        mapaRepresentantes[idKey] = k(item.id_representante_empresa);
+      } else if (Object.prototype.hasOwnProperty.call(item || {}, "id_representante_empresa")) {
+        mapaRepresentantes[idKey] = "";
+      }
     });
 
     return {
@@ -841,6 +868,7 @@ export default function AsignarEstudiantes({
       objetos: Array.from(combinadosMap.values()),
       fechas: mapaFechas,
       empresas: mapaEmpresas,
+      representantes: mapaRepresentantes,
       _t: Date.now(),
     };
   };
@@ -854,6 +882,8 @@ export default function AsignarEstudiantes({
       setFechasInicioIniciales({});
       setEmpresasPorEstudiante({});
       setEmpresasIniciales({});
+      setRepresentantesPorEstudiante({});
+      setRepresentantesIniciales({});
       return;
     }
 
@@ -1043,7 +1073,9 @@ export default function AsignarEstudiantes({
       setIni.has(k(id)) &&
       ((fechasInicio[k(id)] || "") !== (fechasInicioIniciales[k(id)] || "") ||
         (empresasPorEstudiante[k(id)] || "") !==
-          (empresasIniciales[k(id)] || ""))
+          (empresasIniciales[k(id)] || "") ||
+        (representantesPorEstudiante[k(id)] || "") !==
+          (representantesIniciales[k(id)] || ""))
   ).length;
   const hayCambios = agregados + quitados + detallesModificados > 0;
   hayCambiosRef.current = hayCambios;
@@ -1063,7 +1095,8 @@ export default function AsignarEstudiantes({
     mapaEmp,
     mapaFech,
     docId = docenteSeleccionadoId,
-    modId = moduloId
+    modId = moduloId,
+    mapaRep = representantesPorEstudiante
   ) => {
     const nombreMod = nombreModuloDe(moduloActual) || `Módulo ${modId || 1}`;
     const nombreDoc = nombreDe(docenteActual) || "Asesor EFSRT";
@@ -1073,6 +1106,10 @@ export default function AsignarEstudiantes({
       const estObj = mapa.get(key) || { id_estudiante: id };
       const empIdStr = mapaEmp[key] ?? empresaBaseId ?? "";
       const empObj = empIdStr ? mapaEmpresas.get(k(empIdStr)) : null;
+      const representanteId = mapaRep[key] || "";
+      const representante = empObj?.representantes?.find(
+        (item) => k(item.id_representante_empresa) === k(representanteId)
+      );
 
       return {
         id_estudiante: Number.isNaN(Number(id)) ? id : Number(id),
@@ -1092,6 +1129,8 @@ export default function AsignarEstudiantes({
             : Number(empIdStr)
           : null,
         empresa_nombre: empObj ? nombreEmpresaDe(empObj) : "",
+        id_representante_empresa: representanteId || null,
+        representante_empresa_nombre: representante?.nombre || "",
         fecha_inicio: mapaFech[key] || fechaPorDefectoAnio,
         anio: Number(anio),
       };
@@ -1102,12 +1141,13 @@ export default function AsignarEstudiantes({
     idsLista,
     mapaEmp,
     mapaFech,
-    confirmadoServidor = false
+    confirmadoServidor = false,
+    mapaRep = representantesPorEstudiante
   ) => {
     const alcanceKey = `${k(docenteSeleccionadoId || "none")}::${k(
       moduloId || "1"
     )}::${anio}`;
-    const filas = construirFilasRealtime(idsLista, mapaEmp, mapaFech);
+    const filas = construirFilasRealtime(idsLista, mapaEmp, mapaFech, undefined, undefined, mapaRep);
 
     emitirEventoTiempoRealEmpresas({
       alcanceKey,
@@ -1173,9 +1213,39 @@ export default function AsignarEstudiantes({
     setError("");
     setMensajeExito("");
     const nextEmpresas = { ...empresasPorEstudiante, [key]: nuevaEmpresaId };
+    const empresaNueva = nuevaEmpresaId ? mapaEmpresas.get(k(nuevaEmpresaId)) : null;
+    const representanteActual = representantesPorEstudiante[key];
+    const contactoSigueVinculado = empresaNueva?.representantes?.some(
+      (item) => k(item.id_representante_empresa) === k(representanteActual)
+    );
+    const nextRepresentantes = {
+      ...representantesPorEstudiante,
+      [key]: contactoSigueVinculado ? representanteActual : "",
+    };
     setEmpresasPorEstudiante(nextEmpresas);
+    setRepresentantesPorEstudiante(nextRepresentantes);
     if (setSel.has(key)) {
-      notificarTiempoReal(seleccionados, nextEmpresas, fechasInicio, false);
+      notificarTiempoReal(seleccionados, nextEmpresas, fechasInicio, false, nextRepresentantes);
+    }
+  };
+
+  const cambiarRepresentanteEstudiante = (id, nuevoRepresentanteId) => {
+    const key = k(id);
+    setError("");
+    setMensajeExito("");
+    const nextRepresentantes = {
+      ...representantesPorEstudiante,
+      [key]: nuevoRepresentanteId,
+    };
+    setRepresentantesPorEstudiante(nextRepresentantes);
+    if (setSel.has(key)) {
+      notificarTiempoReal(
+        seleccionados,
+        empresasPorEstudiante,
+        fechasInicio,
+        false,
+        nextRepresentantes
+      );
     }
   };
 
@@ -1184,12 +1254,27 @@ export default function AsignarEstudiantes({
     setMensajeExito("");
     setEmpresaBaseId(empId);
     const nextEmpresas = { ...empresasPorEstudiante };
+    const nextRepresentantes = { ...representantesPorEstudiante };
+    const empresaNueva = empId ? mapaEmpresas.get(k(empId)) : null;
     seleccionados.forEach((id) => {
-      nextEmpresas[k(id)] = empId;
+      const key = k(id);
+      nextEmpresas[key] = empId;
+      const actual = nextRepresentantes[key];
+      const valido = empresaNueva?.representantes?.some(
+        (item) => k(item.id_representante_empresa) === k(actual)
+      );
+      if (!valido) nextRepresentantes[key] = "";
     });
     setEmpresasPorEstudiante(nextEmpresas);
+    setRepresentantesPorEstudiante(nextRepresentantes);
     if (seleccionados.length > 0) {
-      notificarTiempoReal(seleccionados, nextEmpresas, fechasInicio, false);
+      notificarTiempoReal(
+        seleccionados,
+        nextEmpresas,
+        fechasInicio,
+        false,
+        nextRepresentantes
+      );
     }
   };
 
@@ -1221,18 +1306,21 @@ export default function AsignarEstudiantes({
     const nextIds = [...seleccionados, ...nuevosIds];
     const nextFechas = { ...fechasInicio };
     const nextEmpresas = { ...empresasPorEstudiante };
+    const nextRepresentantes = { ...representantesPorEstudiante };
 
     nuevosIds.forEach((idKey) => {
       if (!nextFechas[idKey]) nextFechas[idKey] = fechaPorDefectoAnio;
       if (!nextEmpresas[idKey]) {
         nextEmpresas[idKey] = empresaBaseId ? k(empresaBaseId) : "";
       }
+      if (!nextRepresentantes[idKey]) nextRepresentantes[idKey] = "";
     });
 
     setSeleccionados(nextIds);
     setFechasInicio(nextFechas);
     setEmpresasPorEstudiante(nextEmpresas);
-    notificarTiempoReal(nextIds, nextEmpresas, nextFechas, false);
+    setRepresentantesPorEstudiante(nextRepresentantes);
+    notificarTiempoReal(nextIds, nextEmpresas, nextFechas, false, nextRepresentantes);
   };
 
   const quitarVisibles = () => {
@@ -1289,6 +1377,10 @@ export default function AsignarEstudiantes({
         const empIdStr = empresasPorEstudiante[key] || empresaBaseId || "";
         const empObj = empIdStr ? mapaEmpresas.get(k(empIdStr)) : null;
         const estObj = mapa.get(key) || {};
+        const representanteId = representantesPorEstudiante[key] || "";
+        const representante = empObj?.representantes?.find(
+          (item) => k(item.id_representante_empresa) === k(representanteId)
+        );
 
         return {
           id_estudiante: Number.isNaN(Number(id)) ? id : Number(id),
@@ -1308,6 +1400,15 @@ export default function AsignarEstudiantes({
               : Number(empIdStr)
             : null,
           empresa_nombre: empObj ? nombreEmpresaDe(empObj) : "",
+          id_representante_empresa: representanteId
+            ? Number.isNaN(Number(representanteId))
+              ? representanteId
+              : Number(representanteId)
+            : null,
+          representante_empresa_nombre: representante?.nombre || "",
+          representante_empresa_cargo: representante?.cargo || "",
+          representante_empresa_telefono: representante?.telefono || "",
+          representante_empresa_correo: representante?.correo || "",
           ubicacion: empObj ? ubicacionEmpresaDe(empObj) : "",
           fecha_inicio: fechasInicio[key] || fechaPorDefectoAnio,
           periodo_academico: `${anio}-II`,
@@ -1357,6 +1458,7 @@ export default function AsignarEstudiantes({
         objetos: seleccionados.map((id) => mapa.get(k(id)) || { id }),
         fechas: { ...fechasInicio },
         empresas: { ...empresasPorEstudiante },
+        representantes: { ...representantesPorEstudiante },
         _t: Date.now(),
       });
 
@@ -1374,6 +1476,11 @@ export default function AsignarEstudiantes({
           nombre_modulo: item.nombre_modulo,
           programa_estudios: item.programa_estudios,
           id_empresa: item.id_empresa,
+          id_representante_empresa: item.id_representante_empresa,
+          representante_empresa_nombre: item.representante_empresa_nombre,
+          representante_empresa_cargo: item.representante_empresa_cargo,
+          representante_empresa_telefono: item.representante_empresa_telefono,
+          representante_empresa_correo: item.representante_empresa_correo,
           empresa_institucion: item.empresa_nombre,
           empresa_nombre: item.empresa_nombre,
           ubicacion: item.ubicacion,
@@ -1411,8 +1518,9 @@ export default function AsignarEstudiantes({
       setIdsIniciales([...seleccionados]);
       setFechasInicioIniciales({ ...fechasInicio });
       setEmpresasIniciales({ ...empresasPorEstudiante });
+      setRepresentantesIniciales({ ...representantesPorEstudiante });
       setMensajeExito(
-        `Expediente, empresa y asesor guardados para ${nombreMod} (${anio}) · Asesor: ${nombreDoc}.`
+        `Expediente, empresa, representante y asesor guardados para ${nombreMod} (${anio}) · Asesor: ${nombreDoc}.`
       );
       await onGuardadoExitoso?.();
     } catch (err) {
@@ -1535,6 +1643,12 @@ export default function AsignarEstudiantes({
     const esNuevo = !setIni.has(key);
     const fechaEst = fechasInicio[key] || fechaPorDefectoAnio;
     const empEst = empresasPorEstudiante[key] ?? "";
+    const empContactoId = empEst || empresaBaseId;
+    const empresaContacto = empContactoId
+      ? mapaEmpresas.get(k(empContactoId))
+      : null;
+    const contactosEmpresa = empresaContacto?.representantes || [];
+    const representanteEst = representantesPorEstudiante[key] ?? "";
 
     return (
       <li
@@ -1583,6 +1697,29 @@ export default function AsignarEstudiantes({
                   </option>
                 );
               })}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-1">
+            <UserCheck className="h-3.5 w-3.5 shrink-0 text-violet-600" />
+            <select
+              value={representanteEst}
+              disabled={bloqueado || contactosEmpresa.length === 0}
+              onChange={(e) => cambiarRepresentanteEstudiante(id, e.target.value)}
+              aria-label={`Representante de empresa para ${nombre}`}
+              className={`max-w-[170px] cursor-pointer truncate rounded-lg border px-2 py-1.5 text-xs font-semibold outline-none transition ${t.campo}`}
+            >
+              <option value="">
+                {contactosEmpresa.length ? "Contacto..." : "Sin contactos"}
+              </option>
+              {contactosEmpresa.map((contacto) => (
+                <option
+                  key={contacto.id_representante_empresa}
+                  value={k(contacto.id_representante_empresa)}
+                >
+                  {contacto.nombre}{contacto.cargo ? ` · ${contacto.cargo}` : ""}
+                </option>
+              ))}
             </select>
           </label>
 

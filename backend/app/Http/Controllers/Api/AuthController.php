@@ -167,18 +167,44 @@ class AuthController extends Controller
             'dni'       => 'sometimes|required|string|max:15|unique:usuarios,dni,' . $primaryKey . ',' . $keyName,
             'correo'    => 'sometimes|required|email|max:150|unique:usuarios,correo,' . $primaryKey . ',' . $keyName,
             'telefono'  => 'nullable|string|max:20',
-            'rol_id'    => 'sometimes|integer',
-            'id_rol'    => 'sometimes|integer',
+            'rol_id'    => 'sometimes|integer|exists:roles,id_rol',
+            'id_rol'    => 'sometimes|integer|exists:roles,id_rol',
+            'foto'      => 'sometimes|nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
-        $usuario->update([
+        $datosActualizacion = [
             'nombres'   => $request->name ?? $request->nombres ?? $usuario->nombres,
             'apellidos' => $request->apellidos ?? $usuario->apellidos,
             'dni'       => $request->dni ?? $usuario->dni,
             'correo'    => $request->correo ?? $usuario->correo,
             'telefono'  => $request->telefono ?? $usuario->telefono,
             'id_rol'    => $request->rol_id ?? $request->id_rol ?? $usuario->id_rol,
-        ]);
+        ];
+        $fotoAnterior = $usuario->foto_perfil;
+        $rutaFotoNueva = null;
+
+        if ($request->hasFile('foto')) {
+            $archivo = $request->file('foto');
+            $nombreArchivo = 'usuario_' . $usuario->getKey() . '_' . time() . '_' . uniqid() . '.' . $archivo->getClientOriginalExtension();
+            $rutaFotoNueva = $archivo->storeAs('perfiles', $nombreArchivo, 'public');
+            if (!$rutaFotoNueva) {
+                throw new \RuntimeException('No se pudo guardar la foto del usuario.');
+            }
+            $datosActualizacion['foto_perfil'] = '/storage/' . $rutaFotoNueva;
+        }
+
+        try {
+            $usuario->update($datosActualizacion);
+        } catch (\Throwable $error) {
+            if ($rutaFotoNueva) {
+                Storage::disk('public')->delete($rutaFotoNueva);
+            }
+            throw $error;
+        }
+
+        if ($rutaFotoNueva) {
+            $this->eliminarFotoAnterior($fotoAnterior);
+        }
 
         return response()->json([
             'success' => true,
@@ -197,21 +223,22 @@ class AuthController extends Controller
         $idObjetivo = $id ?? $usuarioAuth->getKey();
         $usuario = User::findOrFail($idObjetivo);
 
-        if (!empty($usuario->foto_perfil)) {
-            $rutaAnterior = str_replace('/storage/', '', ltrim($usuario->foto_perfil, '/'));
-            if (Storage::disk('public')->exists($rutaAnterior)) {
-                Storage::disk('public')->delete($rutaAnterior);
-            }
-        }
-
         $archivo = $request->file('foto');
-        $nombreArchivo = 'usuario_' . $usuario->getKey() . '_' . time() . '.' . $archivo->getClientOriginalExtension();
+        $fotoAnterior = $usuario->foto_perfil;
+        $nombreArchivo = 'usuario_' . $usuario->getKey() . '_' . time() . '_' . uniqid() . '.' . $archivo->getClientOriginalExtension();
         $rutaGuardada = $archivo->storeAs('perfiles', $nombreArchivo, 'public');
+        if (!$rutaGuardada) {
+            throw new \RuntimeException('No se pudo guardar la foto del usuario.');
+        }
         $urlPublica = '/storage/' . $rutaGuardada;
 
-        $usuario->update([
-            'foto_perfil' => $urlPublica,
-        ]);
+        try {
+            $usuario->update(['foto_perfil' => $urlPublica]);
+        } catch (\Throwable $error) {
+            Storage::disk('public')->delete($rutaGuardada);
+            throw $error;
+        }
+        $this->eliminarFotoAnterior($fotoAnterior);
 
         return response()->json([
             'success'     => true,
@@ -247,6 +274,23 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Usuario eliminado correctamente'
         ], 200);
+    }
+
+    private function eliminarFotoAnterior(?string $foto): void
+    {
+        if (!$foto) {
+            return;
+        }
+
+        $ruta = parse_url($foto, PHP_URL_PATH) ?: $foto;
+        if (!preg_match('#^/?storage/(.+)$#', $ruta, $coincidencias)) {
+            return;
+        }
+
+        $rutaAlmacenada = $coincidencias[1];
+        if (Storage::disk('public')->exists($rutaAlmacenada)) {
+            Storage::disk('public')->delete($rutaAlmacenada);
+        }
     }
 
     public function cambiarPassword(Request $request)

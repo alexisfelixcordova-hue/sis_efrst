@@ -19,7 +19,6 @@ export default function Login({ foto = fotoLogin, onLogin, onExito }) {
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
   const [ver, setVer] = useState(false);
-  const [recordar, setRecordar] = useState(true);
   const [cargando, setCargando] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -40,16 +39,15 @@ export default function Login({ foto = fotoLogin, onLogin, onExito }) {
     try {
       let dataLogin;
       if (onLogin) {
-        dataLogin = await onLogin({ correo, password, recordar });
+        dataLogin = await onLogin({ correo, password });
       } else {
         const response = await api.post("/login", { correo, password });
         dataLogin = response.data;
         const token = dataLogin?.access_token;
 
         if (token) {
-          const storage = recordar ? localStorage : sessionStorage;
-          storage.setItem("token", token);
-          storage.setItem("access_token", token);
+          sessionStorage.setItem("token", token);
+          sessionStorage.setItem("access_token", token);
         }
       }
 
@@ -259,17 +257,8 @@ export default function Login({ foto = fotoLogin, onLogin, onExito }) {
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                <label className="inline-flex cursor-pointer items-center gap-2.5 text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={recordar}
-                    onChange={(e) => setRecordar(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 accent-blue-600"
-                  />
-                  Recordar sesión
-                </label>
                 <span className="text-xs text-slate-500">
-                  ¿Problemas para ingresar? Contacta al administrador.
+                  La sesión se cerrará automáticamente al volver a abrir el sistema. ¿Problemas para ingresar? Contacta al administrador.
                 </span>
               </div>
 

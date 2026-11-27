@@ -13,6 +13,8 @@ import {
   ChevronRight,
   GraduationCap,
   MapPin,
+  Phone,
+  Mail,
   BriefcaseBusiness,
   Eye,
   RefreshCw,
@@ -364,6 +366,23 @@ const normalizarModulo = (mod, indice = 0) => {
     ),
     fecha_validacion: primerTexto(mod?.fecha_validacion),
     id_empresa: mod?.id_empresa ?? empObj?.id_empresa ?? null,
+    id_representante_empresa: mod?.id_representante_empresa ?? null,
+    representante_empresa_nombre: primerTexto(
+      mod?.representante_empresa_nombre,
+      mod?.representante_empresa?.nombre
+    ),
+    representante_empresa_cargo: primerTexto(
+      mod?.representante_empresa_cargo,
+      mod?.representante_empresa?.cargo
+    ),
+    representante_empresa_telefono: primerTexto(
+      mod?.representante_empresa_telefono,
+      mod?.representante_empresa?.telefono
+    ),
+    representante_empresa_correo: primerTexto(
+      mod?.representante_empresa_correo,
+      mod?.representante_empresa?.correo
+    ),
     id_docente_asesor: mod?.id_docente_asesor ?? null,
     updated_at: primerTexto(mod?.updated_at),
 
@@ -1053,6 +1072,11 @@ export default function ExpedienteAlumno({
               ""
           )
         );
+        const representanteBD = empBD?.representantes?.find(
+          (contacto) =>
+            String(contacto.id_representante_empresa) ===
+            String(mod.id_representante_empresa)
+        );
         const docBD =
           docentePorUsuario.get(
             String(
@@ -1210,6 +1234,22 @@ export default function ExpedienteAlumno({
           empresa_entidad: empresaFinal,
           docente: docenteFinal,
           responsable: supervisorFinal,
+          representante_empresa_nombre: primerTexto(
+            mod.representante_empresa_nombre,
+            representanteBD?.nombre
+          ),
+          representante_empresa_cargo: primerTexto(
+            mod.representante_empresa_cargo,
+            representanteBD?.cargo
+          ),
+          representante_empresa_telefono: primerTexto(
+            mod.representante_empresa_telefono,
+            representanteBD?.telefono
+          ),
+          representante_empresa_correo: primerTexto(
+            mod.representante_empresa_correo,
+            representanteBD?.correo
+          ),
           fecha_inicio: fechaInicioFinal,
           fecha_fin: fechaFinFinal,
           lugar: ubicacionFinal,
@@ -1940,7 +1980,7 @@ export default function ExpedienteAlumno({
 
                 <Seccion
                   titulo="Centro de prácticas"
-                  descripcion="Empresa o institución y docente asesor del módulo"
+                  descripcion="Empresa, contacto asignado y docente asesor del módulo"
                   icon={Building2}
                 >
                   <div className={`grid gap-5 rounded-xl border p-5 sm:grid-cols-2 lg:grid-cols-3 ${subpanel}`}>
@@ -1948,6 +1988,30 @@ export default function ExpedienteAlumno({
                       etiqueta="Empresa o institución"
                       valor={moduloActual.empresa_entidad}
                       icon={BriefcaseBusiness}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Representante de empresa"
+                      valor={moduloActual.representante_empresa_nombre}
+                      icon={UserRound}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Cargo del representante"
+                      valor={moduloActual.representante_empresa_cargo}
+                      icon={BriefcaseBusiness}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Teléfono del representante"
+                      valor={moduloActual.representante_empresa_telefono}
+                      icon={Phone}
+                    />
+
+                    <CampoInformacion
+                      etiqueta="Correo del representante"
+                      valor={moduloActual.representante_empresa_correo}
+                      icon={Mail}
                     />
 
                     <CampoInformacion
