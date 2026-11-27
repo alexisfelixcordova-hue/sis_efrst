@@ -15,12 +15,6 @@ class EstudianteController extends Controller
     private const CACHE_SEGUNDOS = 30;
     private const MAX_POR_PAGINA = 1000;
 
-    /**
-     * Listar estudiantes.
-     * - ?todos=1 o ?all=true o ?per_page>=500 -> todos los registros en un arreglo plano.
-     * - ?per_page=N                         -> paginación con N por página (máx. 1000).
-     * - ?search=texto                       -> filtra por dni, nombres o apellidos.
-     */
     public function index(Request $request)
     {
         $search = trim((string) $request->input('search', ''));
@@ -29,7 +23,6 @@ class EstudianteController extends Controller
             || $request->boolean('todos')
             || $perPageInput >= 500;
 
-        // Listado completo sin búsqueda: se cachea como arreglo simple para evitar __PHP_Incomplete_Class_Name
         if ($todos && $search === '') {
             $estudiantes = Cache::remember(
                 self::CACHE_TODOS,
@@ -71,9 +64,6 @@ class EstudianteController extends Controller
         ], 200);
     }
 
-    /**
-     * Registrar un nuevo estudiante
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -119,9 +109,6 @@ class EstudianteController extends Controller
         ], 201);
     }
 
-    /**
-     * Mostrar el detalle de un estudiante específico
-     */
     public function show($id)
     {
         $estudiante = Estudiante::find($id);
@@ -139,9 +126,6 @@ class EstudianteController extends Controller
         ], 200);
     }
 
-    /**
-     * Actualizar los datos de un estudiante
-     */
     public function update(Request $request, $id)
     {
         $estudiante = Estudiante::find($id);
@@ -157,15 +141,16 @@ class EstudianteController extends Controller
             'dni' => 'sometimes|string|max:8|unique:estudiantes,dni,' . $id . ',id_estudiante',
             'nombres' => 'sometimes|string|max:255',
             'apellidos' => 'sometimes|string|max:255',
-            'correo' => 'sometimes|email|unique:estudiantes,correo,' . $id . ',id_estudiante',
+            'correo' => 'nullable|email|max:150|unique:estudiantes,correo,' . $id . ',id_estudiante',
             'telefono' => 'nullable|string|max:15',
             'programa_estudios' => 'nullable|string|max:255',
             'semestre' => 'nullable|string|max:50',
             'estado' => 'sometimes|string|max:50',
             'foto' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
-            'eliminar_foto' => 'sometimes|boolean',
+            'eliminar_foto' => 'nullable',
         ]);
 
+        $eliminarFoto = filter_var($request->input('eliminar_foto', false), FILTER_VALIDATE_BOOLEAN);
         $fotoAnterior = $estudiante->foto_url;
         $rutaFotoNueva = null;
 
@@ -175,7 +160,7 @@ class EstudianteController extends Controller
                 throw new \RuntimeException('No se pudo guardar la foto del estudiante.');
             }
             $validated['foto_url'] = '/storage/' . $rutaFotoNueva;
-        } elseif ($request->boolean('eliminar_foto')) {
+        } elseif ($eliminarFoto) {
             $validated['foto_url'] = null;
         }
 
@@ -190,7 +175,7 @@ class EstudianteController extends Controller
             throw $error;
         }
 
-        if ($fotoAnterior && ($request->boolean('eliminar_foto') || $rutaFotoNueva)) {
+        if ($fotoAnterior && ($eliminarFoto || $rutaFotoNueva)) {
             $rutaAnterior = $this->rutaAlmacenada($fotoAnterior);
             if ($rutaAnterior && Storage::disk('public')->exists($rutaAnterior)) {
                 Storage::disk('public')->delete($rutaAnterior);
@@ -202,13 +187,10 @@ class EstudianteController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Estudiante actualizado correctamente',
-            'data' => $estudiante
+            'data' => $estudiante->fresh()
         ], 200);
     }
 
-    /**
-     * Eliminar un estudiante
-     */
     public function destroy($id)
     {
         $estudiante = Estudiante::find($id);
@@ -236,9 +218,6 @@ class EstudianteController extends Controller
         ], 200);
     }
 
-    /**
-     * Consultar DNI en la API externa (RENIEC / Decolecta)
-     */
     public function consultarDni($dni)
     {
         $dni = preg_replace('/\D/', '', trim($dni));
@@ -247,8 +226,14 @@ class EstudianteController extends Controller
             return response()->json(['error' => 'El DNI debe tener exactamente 8 dígitos.'], 400);
         }
 
-        $url = 'https://api.decolecta.com/v1/reniec/dni?numero=' . $dni;
-        $token = env('SUNAT_API_TOKEN');
+        $token = $_ENV['DECOLECTA_API_TOKEN']
+            ?? $_SERVER['DECOLECTA_API_TOKEN']
+            ?? env('DECOLECTA_API_TOKEN')
+            ?? $_ENV['SUNAT_API_TOKEN']
+            ?? $_SERVER['SUNAT_API_TOKEN']
+            ?? env('SUNAT_API_TOKEN');
+
+        $url = 'https://api.decolecta.com/v1/reniec/dni?numero=' . urlencode($dni);
 
         $curl = curl_init();
         curl_setopt_array($curl, [

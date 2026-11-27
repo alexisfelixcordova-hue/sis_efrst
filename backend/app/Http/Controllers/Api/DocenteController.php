@@ -37,9 +37,6 @@ class DocenteController extends Controller
         return in_array($columna, $this->columnasPorTabla[$tabla], true);
     }
 
-    /**
-     * Lista de docentes para la pantalla "Plantel docente".
-     */
     public function index()
     {
         $tieneFoto = $this->existeColumna('usuarios', 'foto_perfil');
@@ -88,9 +85,6 @@ class DocenteController extends Controller
         })->values());
     }
 
-    /**
-     * Ficha de un docente con sus alumnos asignados y datos completos.
-     */
     public function show($id)
     {
         $tieneFoto = $this->existeColumna('usuarios', 'foto_perfil');
@@ -114,7 +108,6 @@ class DocenteController extends Controller
             return response()->json(['message' => 'Docente no encontrado'], 404);
         }
 
-        // Obtenemos los alumnos asignados mapeando todas las columnas de la tabla 'estudiantes'
         $alumnos = DB::table('asignacion_asesores as a')
             ->join('estudiantes as e', 'e.id_estudiante', '=', 'a.id_estudiante')
             ->where('a.id_docente', $id)
@@ -169,9 +162,6 @@ class DocenteController extends Controller
         ]);
     }
 
-    /**
-     * Lista los IDs de estudiantes actualmente asignados a un docente (opcionalmente filtrado por módulo).
-     */
     public function estudiantesAsignados(Request $request, $id)
     {
         $query = DB::table('asignacion_asesores as a')
@@ -286,9 +276,6 @@ class DocenteController extends Controller
         ]);
     }
 
-    /**
-     * Guarda o actualiza en lote los estudiantes asignados a un docente para un módulo y periodo.
-     */
     public function asignarEstudiantes(Request $request, $id)
     {
         $validated = $request->validate([
@@ -323,6 +310,7 @@ class DocenteController extends Controller
         $tienePeriodo   = $this->existeColumna('asignacion_asesores', 'periodo_academico');
         $tieneCreatedAt = $this->existeColumna('asignacion_asesores', 'created_at');
         $tieneUpdatedAt = $this->existeColumna('asignacion_asesores', 'updated_at');
+
         $empresasPorEstudiante = collect($validated['asignaciones'] ?? [])
             ->mapWithKeys(fn ($asignacion) => [
                 (string) $asignacion['id_estudiante'] => $asignacion['id_empresa'] ?? null,
@@ -335,6 +323,7 @@ class DocenteController extends Controller
             ->mapWithKeys(fn ($asignacion) => [
                 (string) $asignacion['id_estudiante'] => $asignacion['fecha_inicio'] ?? null,
             ]);
+
         $empresaPredeterminada = $validated['id_empresa'] ?? null;
         $tieneEmpresaAsignacion = $this->existeColumna('asignacion_asesores', 'id_empresa');
         $tieneTablaExpediente = $this->existeTabla('expediente_efsrt');
@@ -351,6 +340,7 @@ class DocenteController extends Controller
         $hayRepresentantesAsignados = $idsEstudiantes && collect($idsEstudiantes)->contains(
             fn ($idEstudiante) => $representantesPorEstudiante->get((string) $idEstudiante) !== null
         );
+
         if ($hayEmpresasAsignadas && !$tieneEmpresaAsignacion && !$tieneEmpresaExpediente) {
             throw ValidationException::withMessages([
                 'asignaciones' => 'La base de datos no permite guardar la empresa vinculada al expediente.',
@@ -366,6 +356,7 @@ class DocenteController extends Controller
                 'asignaciones' => 'El expediente debe permitir guardar la empresa para asignar un representante.',
             ]);
         }
+
         foreach ($validated['asignaciones'] ?? [] as $asignacion) {
             $idRepresentante = $asignacion['id_representante_empresa'] ?? null;
             if ($idRepresentante === null) {
@@ -378,6 +369,7 @@ class DocenteController extends Controller
                     ->where('id_representante_empresa', $idRepresentante)
                     ->where('id_empresa', $idEmpresa)
                     ->exists();
+
             if (!$contactoPerteneceAEmpresa) {
                 throw ValidationException::withMessages([
                     'asignaciones' => 'El representante seleccionado debe pertenecer a la empresa asignada al estudiante.',
@@ -405,13 +397,15 @@ class DocenteController extends Controller
             $tieneUpdatedAt,
             $tieneEmpresaAsignacion,
             $tieneEmpresaExpediente,
+            $tieneRepresentanteExpediente,
             $tieneTablaExpediente,
             $empresasPorEstudiante,
+            $representantesPorEstudiante,
             $fechasInicioPorEstudiante,
-            $empresaPredeterminada,
-            $validated
+            $empresaPredeterminada
         ) {
-            // 1. Elimina asignaciones actuales de este docente en el módulo (y periodo si aplica)
+            $ahora = now();
+
             $borrarDocente = DB::table('asignacion_asesores')
                 ->where('id_docente', $id)
                 ->where('id_modulo', $idModulo);
@@ -421,7 +415,6 @@ class DocenteController extends Controller
             }
             $borrarDocente->delete();
 
-            // 2. Evita violar la restricción única uq_estudiante_modulo_periodo
             if (!empty($idsEstudiantes)) {
                 $borrarConflictos = DB::table('asignacion_asesores')
                     ->whereIn('id_estudiante', $idsEstudiantes)
@@ -432,7 +425,6 @@ class DocenteController extends Controller
                 }
                 $borrarConflictos->delete();
 
-                $ahora = now();
                 $filas = array_map(function ($idEstudiante) use (
                     $id,
                     $idModulo,
@@ -475,37 +467,39 @@ class DocenteController extends Controller
             }
 
             if ($tieneEmpresaExpediente && $tieneTablaExpediente) {
+                $tienePeriodoExp = $this->existeColumna('expediente_efsrt', 'periodo_academico');
+                $tieneIdExp = $this->existeColumna('expediente_efsrt', 'id_expediente');
+                $tieneIdGeneric = $this->existeColumna('expediente_efsrt', 'id');
+
                 foreach ($idsEstudiantes as $idEstudiante) {
                     $empresaId = $empresasPorEstudiante->get(
                         (string) $idEstudiante,
                         $empresaPredeterminada
                     );
+                    $representanteId = $representantesPorEstudiante->get((string) $idEstudiante);
+
                     $criterios = [
                         'id_estudiante' => $idEstudiante,
-                        'id_modulo' => $idModulo,
+                        'id_modulo'     => $idModulo,
                     ];
-                    if ($this->existeColumna('expediente_efsrt', 'periodo_academico')) {
+                    if ($tienePeriodoExp) {
                         $criterios['periodo_academico'] = $periodo;
                     }
 
                     $expediente = DB::table('expediente_efsrt')
                         ->where($criterios)
-                        ->orderByDesc(
-                            $this->existeColumna('expediente_efsrt', 'id_expediente')
-                                ? 'id_expediente'
-                                : 'id_modulo'
-                        )
+                        ->orderByDesc($tieneIdExp ? 'id_expediente' : 'id_modulo')
                         ->first();
 
-                    if (!$expediente && $empresaId === null) {
+                    if (!$expediente && $empresaId === null && $representanteId === null) {
                         continue;
                     }
 
                     $datosExpediente = ['id_empresa' => $empresaId];
                     if ($tieneRepresentanteExpediente) {
-                        $datosExpediente['id_representante_empresa'] =
-                            $representantesPorEstudiante->get((string) $idEstudiante);
+                        $datosExpediente['id_representante_empresa'] = $representanteId;
                     }
+
                     $fechaInicio = $fechasInicioPorEstudiante->get((string) $idEstudiante);
                     if ($fechaInicio && $this->existeColumna('expediente_efsrt', 'fecha_inicio')) {
                         $datosExpediente['fecha_inicio'] = $fechaInicio;
@@ -513,7 +507,7 @@ class DocenteController extends Controller
                     if ($this->existeColumna('expediente_efsrt', 'id_docente_asesor')) {
                         $datosExpediente['id_docente_asesor'] = (int) $id;
                     }
-                    if ($this->existeColumna('expediente_efsrt', 'periodo_academico')) {
+                    if ($tienePeriodoExp) {
                         $datosExpediente['periodo_academico'] = $periodo;
                     }
                     if ($this->existeColumna('expediente_efsrt', 'updated_at')) {
@@ -522,9 +516,7 @@ class DocenteController extends Controller
 
                     if ($expediente) {
                         $idExpediente = $expediente->id_expediente ?? $expediente->id ?? null;
-                        $columnaId = $this->existeColumna('expediente_efsrt', 'id_expediente')
-                            ? 'id_expediente'
-                            : ($this->existeColumna('expediente_efsrt', 'id') ? 'id' : null);
+                        $columnaId = $tieneIdExp ? 'id_expediente' : ($tieneIdGeneric ? 'id' : null);
 
                         $actualizacion = DB::table('expediente_efsrt')->where($criterios);
                         if ($columnaId && $idExpediente !== null) {
@@ -550,6 +542,7 @@ class DocenteController extends Controller
                     if ($this->existeColumna('expediente_efsrt', 'created_at')) {
                         $nuevoExpediente['created_at'] = $ahora;
                     }
+
                     DB::table('expediente_efsrt')->insert($nuevoExpediente);
                 }
             }
@@ -570,9 +563,6 @@ class DocenteController extends Controller
         ]);
     }
 
-    /**
-     * Módulos en los que trabaja cada docente.
-     */
     private function modulosPorDocente(): array
     {
         $tabla = 'modulos_profesionales';

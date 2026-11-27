@@ -11,9 +11,6 @@ use Illuminate\Support\Str;
 
 class ConstanciaEmitidaController extends Controller
 {
-    /**
-     * Listar todos los estudiantes y cruzar su estado real con expedientes y constancias_emitidas
-     */
     public function index(Request $request)
     {
         $query = DB::table('estudiantes as e')
@@ -76,14 +73,18 @@ class ConstanciaEmitidaController extends Controller
 
         if (Schema::hasColumn('expediente_efsrt', 'id_empresa') && Schema::hasTable('empresas_convenio')) {
             $query->leftJoin('empresas_convenio as emp', 'exp.id_empresa', '=', 'emp.id_empresa');
-            $select[] = DB::raw("COALESCE(emp.razon_social, emp.nombre_comercial, 'Empresa formadora asignada') as empresa_nombre");
+            $select[] = Schema::hasColumn('empresas_convenio', 'razon_social')
+                ? DB::raw("COALESCE(emp.razon_social, 'Empresa formadora asignada') as empresa_nombre")
+                : DB::raw("'Empresa formadora asignada' as empresa_nombre");
         } else {
             $select[] = DB::raw("'Empresa formadora asignada' as empresa_nombre");
         }
 
         if (Schema::hasColumn('expediente_efsrt', 'id_docente_asesor') && Schema::hasTable('usuarios')) {
             $query->leftJoin('usuarios as doc', 'exp.id_docente_asesor', '=', 'doc.id_usuario');
-            $select[] = DB::raw("COALESCE(doc.nombre, doc.nombres, 'Docente asesor EFSRT') as asesor_nombre");
+            $select[] = Schema::hasColumn('usuarios', 'nombres')
+                ? DB::raw("COALESCE(doc.nombres, 'Docente asesor EFSRT') as asesor_nombre")
+                : DB::raw("'Docente asesor EFSRT' as asesor_nombre");
         } else {
             $select[] = DB::raw("'Docente asesor EFSRT' as asesor_nombre");
         }
@@ -175,9 +176,6 @@ class ConstanciaEmitidaController extends Controller
         return response()->json($expedientes->values(), 200);
     }
 
-    /**
-     * Generar constancia institucional evitando duplicados por estudiante y módulo
-     */
     public function generar(Request $request)
     {
         $request->validate([

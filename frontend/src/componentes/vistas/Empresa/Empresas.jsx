@@ -19,6 +19,17 @@ const idEstDe = (est) =>
             ''
     );
 
+const contactoPrincipal = (emp) => {
+    if (!emp) return null;
+    if (emp.representante_principal && typeof emp.representante_principal === 'object') {
+        return emp.representante_principal;
+    }
+    if (Array.isArray(emp.representantes) && emp.representantes.length > 0) {
+        return emp.representantes[0];
+    }
+    return null;
+};
+
 const leerCache = (clave) => {
     try {
         const guardado = sessionStorage.getItem(clave);
@@ -333,6 +344,7 @@ export default function Empresas() {
     const [filtro, setFiltro] = useState('todas');
     const [orden, setOrden] = useState({ campo: 'razon_social', dir: 'asc' });
     const [pagina, setPagina] = useState(1);
+
     const aplicarAsignacionesEnTiempoReal = useCallback((detalle, refrescarApi = false) => {
         if (!detalle || !Array.isArray(detalle.asignaciones)) return;
 
@@ -369,7 +381,6 @@ export default function Empresas() {
                 const empKey = idEmpDe(emp);
                 const actuales = Array.isArray(emp.estudiantes) ? emp.estudiantes : [];
 
-                // Conserva practicantes de otros alcances (otro docente/módulo/año) y reemplaza los del alcance actual
                 const sinAlcanceActual = actuales.filter(
                     (est) => est?._alcanceKey !== alcance
                 );
@@ -601,10 +612,19 @@ export default function Empresas() {
     const filtradas = useMemo(() => {
         const texto = busqueda.toLowerCase();
         const res = lista.filter(emp => {
+            const rep = contactoPrincipal(emp);
+            const nombresReps = [
+                rep?.nombre,
+                ...(Array.isArray(emp.representantes) ? emp.representantes.map(r => r.nombre) : []),
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+
             const coincideTexto =
                 (emp.razon_social || '').toLowerCase().includes(texto) ||
                 String(emp.ruc || '').includes(texto) ||
-                (emp.supervisor_empresa_nombre || '').toLowerCase().includes(texto);
+                nombresReps.includes(texto);
             const n = emp.estudiantes ? emp.estudiantes.length : 0;
             const coincideFiltro =
                 filtro === 'todas' || (filtro === 'con' && n > 0) || (filtro === 'sin' && n === 0);
@@ -628,8 +648,25 @@ export default function Empresas() {
     const exportarCSV = () => {
         const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
         const filas = [
-            ['RUC', 'Razón social', 'Estado', 'Condición', 'Departamento', 'Provincia', 'Distrito', 'Ubigeo', 'Supervisor / Representante', 'Teléfono', 'Correo', 'Dirección', 'Practicantes'],
-            ...filtradas.map(e => [e.ruc, e.razon_social, e.estado, e.condicion, e.departamento, e.provincia, e.distrito, e.ubigeo, e.supervisor_empresa_nombre, e.telefono, e.correo_electronico, e.direccion, nEst(e)]),
+            ['RUC', 'Razón social', 'Estado', 'Condición', 'Departamento', 'Provincia', 'Distrito', 'Ubigeo', 'Representante principal', 'Teléfono', 'Correo', 'Dirección', 'Practicantes'],
+            ...filtradas.map(e => {
+                const rep = contactoPrincipal(e);
+                return [
+                    e.ruc,
+                    e.razon_social,
+                    e.estado,
+                    e.condicion,
+                    e.departamento,
+                    e.provincia,
+                    e.distrito,
+                    e.ubigeo,
+                    rep?.nombre || '',
+                    rep?.telefono || e.telefono,
+                    rep?.correo || e.correo_electronico,
+                    e.direccion,
+                    nEst(e),
+                ];
+            }),
         ];
         const csv = '\ufeff' + filas.map(f => f.map(esc).join(',')).join('\n');
         const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
@@ -667,10 +704,21 @@ export default function Empresas() {
     const ea = estilosAlerta[alerta.tipo] || estilosAlerta.error;
     const rucCompleto = formData.ruc.length === 11;
     const selEmp = selId !== null ? lista.find(e => e.id_empresa === selId) : null;
+    const selContacto = contactoPrincipal(selEmp);
 
     const actualizarRepresentantesEmpresa = (representantes) => {
+        const principalId = representantes?.[0]?.id_representante_empresa ?? null;
+        const principalObj = representantes?.[0] ?? null;
+
         const actualizadas = lista.map((empresa) =>
-            empresa.id_empresa === selId ? { ...empresa, representantes } : empresa
+            empresa.id_empresa === selId
+                ? {
+                    ...empresa,
+                    representantes,
+                    id_representante_empresa: principalId,
+                    representante_principal: principalObj,
+                }
+                : empresa
         );
         setEmpresas(actualizadas);
         guardarCache(CACHE_EMPRESAS, actualizadas);
@@ -891,6 +939,8 @@ export default function Empresas() {
                                     pagina_.map((emp, i) => {
                                         const est = emp.estudiantes || [];
                                         const zona = [emp.distrito, emp.provincia].filter(Boolean).join(', ');
+                                        const rep = contactoPrincipal(emp);
+                                        const detalleContacto = rep?.telefono || rep?.correo || emp.telefono || emp.correo_electronico || 'Sin contacto';
                                         return (
                                             <tr
                                                 key={emp.id_empresa}
@@ -917,10 +967,10 @@ export default function Empresas() {
                                                 </td>
                                                 <td className="py-4 px-4">
                                                     <div className="space-y-1">
-                                                        <p className="text-slate-800 font-medium text-[13px] line-clamp-1">{emp.supervisor_empresa_nombre || 'No asignado'}</p>
+                                                        <p className="text-slate-800 font-medium text-[13px] line-clamp-1">{rep?.nombre || 'No asignado'}</p>
                                                         <p className="flex items-center gap-1.5 text-xs text-slate-400">
                                                             <IconPhone />
-                                                            <span className="truncate max-w-[150px]">{emp.telefono || emp.correo_electronico || 'Sin contacto'}</span>
+                                                            <span className="truncate max-w-[150px]">{detalleContacto}</span>
                                                         </p>
                                                     </div>
                                                 </td>
@@ -1116,9 +1166,19 @@ export default function Empresas() {
                             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Contacto</h3>
                             <div className="divide-y divide-slate-100">
                                 {[
-                                    [IconUser, 'Representante', selEmp.supervisor_empresa_nombre, null],
-                                    [IconPhone, 'Teléfono', selEmp.telefono, selEmp.telefono ? `tel:${selEmp.telefono}` : null],
-                                    [IconMail, 'Correo', selEmp.correo_electronico, selEmp.correo_electronico ? `mailto:${selEmp.correo_electronico}` : null],
+                                    [IconUser, 'Representante', selContacto?.nombre || null, null],
+                                    [
+                                        IconPhone,
+                                        'Teléfono',
+                                        selContacto?.telefono || selEmp.telefono || null,
+                                        (selContacto?.telefono || selEmp.telefono) ? `tel:${selContacto?.telefono || selEmp.telefono}` : null,
+                                    ],
+                                    [
+                                        IconMail,
+                                        'Correo',
+                                        selContacto?.correo || selEmp.correo_electronico || null,
+                                        (selContacto?.correo || selEmp.correo_electronico) ? `mailto:${selContacto?.correo || selEmp.correo_electronico}` : null,
+                                    ],
                                 ].map(([Ic, k, v, href]) => (
                                     <div key={k} className="flex items-center gap-3 py-3">
                                         <span className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center"><Ic className="w-4 h-4" /></span>

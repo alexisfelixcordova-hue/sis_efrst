@@ -14,10 +14,9 @@ class Empresa extends Model
     protected $primaryKey = 'id_empresa';
 
     protected $fillable = [
+        'id_representante_empresa',
         'ruc',
         'razon_social',
-        'supervisor_empresa_nombre',
-        'supervisor_empresa_cargo',
         'estado_convenio',
         'documento_convenio_ruta',
         'telefono',
@@ -32,7 +31,6 @@ class Empresa extends Model
         'ubigeo',
     ];
 
-    // Relación directa con expedientes
     public function expedientes()
     {
         return $this->hasMany(ExpedienteEfsrt::class, 'id_empresa', 'id_empresa');
@@ -44,16 +42,24 @@ class Empresa extends Model
             ->orderBy('nombre');
     }
 
-    // Estudiantes practicantes a través de los expedientes de la empresa
+    public function representantePrincipal()
+    {
+        return $this->belongsTo(
+            RepresentanteEmpresa::class,
+            'id_representante_empresa',
+            'id_representante_empresa'
+        );
+    }
+
     public function estudiantes()
     {
         return $this->hasManyThrough(
             Estudiante::class,
             ExpedienteEfsrt::class,
-            'id_empresa',     // Foreign key en expediente_efsrt
-            'id_estudiante',  // Foreign key en estudiantes
-            'id_empresa',     // Local key en empresas_convenio
-            'id_estudiante'   // Local key en expediente_efsrt
+            'id_empresa',
+            'id_estudiante',
+            'id_empresa',
+            'id_estudiante'
         );
     }
 }

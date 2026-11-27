@@ -32,9 +32,14 @@ import {
 import api, { getCachedData, invalidateApiCache } from "../../../../api/axios";
 import AvatarEstudiante from "../../../AvatarEstudiante.jsx";
 
+// ============================================================================
+// 1. CONSTANTES Y EXTRACTORES DE RELACIONES / MODELOS (BD POSTGRESQL)
+// ============================================================================
+
 const k = (id) => String(id);
 
 const obtenerIdDocente = (d) => d?.id_docente ?? d?.id ?? d?.id_usuario;
+
 const obtenerIdEstudiante = (e) =>
   e?.id_estudiante ??
   e?.estudiante_id ??
@@ -45,6 +50,7 @@ const obtenerIdEstudiante = (e) =>
   e?.alumno?.id ??
   e?.id ??
   e?.id_usuario;
+
 const obtenerIdModulo = (m) => m?.id_modulo ?? m?.id;
 const obtenerIdEmpresa = (emp) => emp?.id_empresa ?? emp?.id;
 
@@ -112,8 +118,7 @@ const normalizarModulosCon123 = (arreglo = []) => {
   });
 
   [1, 2, 3].forEach((n) => {
-    const yaExiste = enriquecidos.some((item) => item._orden === n);
-    if (!yaExiste) {
+    if (!enriquecidos.some((item) => item._orden === n)) {
       enriquecidos.push({
         id_modulo: String(n),
         numero_modulo: n,
@@ -145,17 +150,8 @@ const ubicacionEmpresaDe = (emp) =>
   "";
 
 const basePersonaDe = (p) => p?.estudiante || p?.alumno || p || {};
-
-const nombresDe = (p) => {
-  const base = basePersonaDe(p);
-  return base?.nombres || base?.nombre || "";
-};
-
-const apellidosDe = (p) => {
-  const base = basePersonaDe(p);
-  return base?.apellidos || "";
-};
-
+const nombresDe = (p) => basePersonaDe(p)?.nombres || basePersonaDe(p)?.nombre || "";
+const apellidosDe = (p) => basePersonaDe(p)?.apellidos || "";
 const nombreDe = (p) => `${nombresDe(p)} ${apellidosDe(p)}`.trim();
 
 const especialidadDocenteDe = (d) =>
@@ -165,20 +161,10 @@ const especialidadDocenteDe = (d) =>
   d?.cargo ||
   "Asesor EFSRT";
 
-const dniDe = (e) => {
-  const base = basePersonaDe(e);
-  return base.dni || base.numero_documento || "Sin DNI";
-};
-
-const programaDe = (e) => {
-  const base = basePersonaDe(e);
-  return base.programa_estudios || base.programa || base.especialidad || "";
-};
-
-const correoDe = (e) => {
-  const base = basePersonaDe(e);
-  return base.correo || base.email || "";
-};
+const dniDe = (e) => basePersonaDe(e).dni || basePersonaDe(e).numero_documento || "Sin DNI";
+const programaDe = (e) =>
+  basePersonaDe(e).programa_estudios || basePersonaDe(e).programa || basePersonaDe(e).especialidad || "";
+const correoDe = (e) => basePersonaDe(e).correo || basePersonaDe(e).email || "";
 
 const iniciales = (texto = "") =>
   texto
@@ -205,17 +191,19 @@ const coincide = (est, q) =>
 const extraerLista = (payload) => {
   if (!payload) return [];
   if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data)) return payload.data;
-  if (Array.isArray(payload?.data?.data)) return payload.data.data;
-  if (Array.isArray(payload?.data?.estudiantes)) return payload.data.estudiantes;
-  if (Array.isArray(payload?.data?.asignaciones)) return payload.data.asignaciones;
-  if (Array.isArray(payload?.estudiantes)) return payload.estudiantes;
-  if (Array.isArray(payload?.asignaciones)) return payload.asignaciones;
-  if (Array.isArray(payload?.alumnos)) return payload.alumnos;
-  if (Array.isArray(payload?.docentes)) return payload.docentes;
-  if (Array.isArray(payload?.empresas)) return payload.empresas;
-  if (Array.isArray(payload?.modulos)) return payload.modulos;
-  return [];
+  const rutas = [
+    payload?.data,
+    payload?.data?.data,
+    payload?.data?.estudiantes,
+    payload?.data?.asignaciones,
+    payload?.estudiantes,
+    payload?.asignaciones,
+    payload?.alumnos,
+    payload?.docentes,
+    payload?.empresas,
+    payload?.modulos,
+  ];
+  return rutas.find(Array.isArray) || [];
 };
 
 const extraerDocenteDeEstudiante = (est) =>
@@ -245,22 +233,26 @@ const extraerDocenteDeModulo = (mod) =>
   mod?.docente?.id ??
   null;
 
+// ============================================================================
+// 2. RESPALDO LOCAL DE EXPEDIENTES Y EVENTOS EN TIEMPO REAL
+// ============================================================================
+
+const clavesExpediente = (idEst, idMod, numMod) => [
+  `expediente_efsrt_${idEst}_${idMod}`,
+  `expediente_efsrt_${idEst}_m${numMod}`,
+  `expediente_efsrt_${idEst}_${numMod}`,
+  `asignacion_efsrt_${idEst}_${idMod}`,
+  `asignacion_efsrt_${idEst}_m${numMod}`,
+  `asignacion_efsrt_${idEst}_${numMod}`,
+];
+
 const leerRegistroLocalModulo = (idEst, idMod, numMod) => {
-  const claves = [
-    `expediente_efsrt_${idEst}_${idMod}`,
-    `expediente_efsrt_${idEst}_m${numMod}`,
-    `expediente_efsrt_${idEst}_${numMod}`,
-    `asignacion_efsrt_${idEst}_${idMod}`,
-    `asignacion_efsrt_${idEst}_m${numMod}`,
-    `asignacion_efsrt_${idEst}_${numMod}`,
-  ];
-  for (const clave of claves) {
+  for (const clave of clavesExpediente(idEst, idMod, numMod)) {
     try {
-      const raw =
-        sessionStorage.getItem(clave) ?? localStorage.getItem(clave);
+      const raw = sessionStorage.getItem(clave) ?? localStorage.getItem(clave);
       if (raw) return JSON.parse(raw);
     } catch {
-      /* ignorar */
+      /* ignorar almacenamiento no disponible */
     }
   }
   return null;
@@ -268,20 +260,12 @@ const leerRegistroLocalModulo = (idEst, idMod, numMod) => {
 
 const guardarRegistroLocalModulo = (idEst, idMod, numMod, obj) => {
   const serialized = JSON.stringify(obj);
-  const claves = [
-    `expediente_efsrt_${idEst}_${idMod}`,
-    `expediente_efsrt_${idEst}_m${numMod}`,
-    `expediente_efsrt_${idEst}_${numMod}`,
-    `asignacion_efsrt_${idEst}_${idMod}`,
-    `asignacion_efsrt_${idEst}_m${numMod}`,
-    `asignacion_efsrt_${idEst}_${numMod}`,
-  ];
-  claves.forEach((clave) => {
+  clavesExpediente(idEst, idMod, numMod).forEach((clave) => {
     try {
       sessionStorage.setItem(clave, serialized);
       localStorage.setItem(clave, serialized);
     } catch {
-      /* ignorar */
+      /* ignorar almacenamiento no disponible */
     }
   });
 };
@@ -292,10 +276,7 @@ const KEY_SNAPSHOT_EMPRESAS_REALTIME = "efsrt_empresas_realtime_snapshot_v1";
 const emitirEventoTiempoRealEmpresas = (detalle) => {
   const payload = { ...detalle, timestamp: Date.now() };
   try {
-    sessionStorage.setItem(
-      KEY_SNAPSHOT_EMPRESAS_REALTIME,
-      JSON.stringify(payload)
-    );
+    sessionStorage.setItem(KEY_SNAPSHOT_EMPRESAS_REALTIME, JSON.stringify(payload));
   } catch {
     /* ignorar */
   }
@@ -319,6 +300,10 @@ const emitirEventoTiempoRealEmpresas = (detalle) => {
     /* ignorar */
   }
 };
+
+// ============================================================================
+// 3. CACHÉ EN MEMORIA Y CONSULTAS A LA API LARAVEL
+// ============================================================================
 
 const MEM = { docentes: null, estudiantes: null, modulos: null, empresas: null };
 const ASIG_MEM = new Map();
@@ -368,18 +353,26 @@ const traerAsignadosApi = async (docId, modId, anioV) => {
       return extraerLista(res.data);
     }
 
-    const resModulo = await api.get(
-      `/modulos-profesionales/${modId}/estudiantes`,
-      {
-        params: {
-          ...(anioV ? { anio: anioV, periodo_academico: `${anioV}-II` } : {}),
-        },
-        headers,
-      }
-    );
+    const resModulo = await api.get(`/modulos-profesionales/${modId}/estudiantes`, {
+      params: {
+        ...(anioV ? { anio: anioV, periodo_academico: `${anioV}-II` } : {}),
+      },
+      headers,
+    });
     return extraerLista(resModulo.data);
   });
 };
+
+const normalizarIdApi = (valor) =>
+  valor === "" || valor == null
+    ? null
+    : Number.isNaN(Number(valor))
+    ? valor
+    : Number(valor);
+
+// ============================================================================
+// 4. COMPONENTE PRINCIPAL: DOCENTE ASESOR POR MÓDULO Y EXPEDIENTE
+// ============================================================================
 
 export default function AsignarEstudiantes({
   onVolver,
@@ -392,15 +385,13 @@ export default function AsignarEstudiantes({
   darkMode = false,
   onGuardadoExitoso,
 }) {
+  // Valores iniciales combinando props y caché de la API
   const inicialDocentes = useMemo(() => {
     const desdeCache = extraerLista(getCachedData("/docentes"));
     if (Array.isArray(docentesProp) && docentesProp.length > 0) {
-      return docentesProp.length >= desdeCache.length
-        ? docentesProp
-        : desdeCache;
+      return docentesProp.length >= desdeCache.length ? docentesProp : desdeCache;
     }
-    if (MEM.docentes?.length) return MEM.docentes;
-    return desdeCache;
+    return MEM.docentes?.length ? MEM.docentes : desdeCache;
   }, [docentesProp]);
 
   const inicialEstudiantes = useMemo(() => {
@@ -410,33 +401,34 @@ export default function AsignarEstudiantes({
         ? estudiantesProp
         : desdeCache;
     }
-    if (MEM.estudiantes?.length) return MEM.estudiantes;
-    return desdeCache;
+    return MEM.estudiantes?.length ? MEM.estudiantes : desdeCache;
   }, [estudiantesProp]);
 
   const inicialModulos = useMemo(() => {
-    if (Array.isArray(modulosProp) && modulosProp.length > 0)
+    if (Array.isArray(modulosProp) && modulosProp.length > 0) {
       return normalizarModulosCon123(modulosProp);
-    if (MEM.modulos?.length) return MEM.modulos;
-    return normalizarModulosCon123(
-      extraerLista(getCachedData("/modulos-profesionales"))
-    );
+    }
+    return MEM.modulos?.length
+      ? MEM.modulos
+      : normalizarModulosCon123(
+          extraerLista(getCachedData("/modulos-profesionales"))
+        );
   }, [modulosProp]);
 
   const inicialEmpresas = useMemo(() => {
     const desdeCache = extraerLista(getCachedData("/empresas"));
     if (Array.isArray(empresasProp) && empresasProp.length > 0) {
-      return empresasProp.length >= desdeCache.length
-        ? empresasProp
-        : desdeCache;
+      return empresasProp.length >= desdeCache.length ? empresasProp : desdeCache;
     }
-    if (MEM.empresas?.length) return MEM.empresas;
-    return desdeCache;
+    return MEM.empresas?.length ? MEM.empresas : desdeCache;
   }, [empresasProp]);
 
+  // Catálogos y contexto de módulo / asesor / año
   const [docentes, setDocentes] = useState(inicialDocentes);
   const [busquedaDocente, setBusquedaDocente] = useState("");
   const [listaModulos, setListaModulos] = useState(inicialModulos);
+  const [listaEstudiantes, setListaEstudiantes] = useState(inicialEstudiantes);
+  const [listaEmpresas, setListaEmpresas] = useState(inicialEmpresas);
 
   const [moduloId, setModuloId] = useState(() => {
     const primero = inicialModulos[0];
@@ -449,9 +441,7 @@ export default function AsignarEstudiantes({
     inicialModulos.forEach((m) => {
       const idM = obtenerIdModulo(m);
       const idD = extraerDocenteDeModulo(m);
-      if (idM != null && idD != null) {
-        mapaInicial[k(idM)] = k(idD);
-      }
+      if (idM != null && idD != null) mapaInicial[k(idM)] = k(idD);
     });
     return mapaInicial;
   });
@@ -461,26 +451,19 @@ export default function AsignarEstudiantes({
     return base ? k(obtenerIdDocente(base)) : "";
   });
 
-  const seleccionManualDocenteRef = useRef(false);
-  const inicializoDocentePropRef = useRef(false);
-
   const [empresaBaseId, setEmpresaBaseId] = useState("");
-  const [listaEstudiantes, setListaEstudiantes] = useState(inicialEstudiantes);
-  const [cargandoEstudiantes, setCargandoEstudiantes] = useState(
-    () => inicialEstudiantes.length === 0
-  );
-  const [listaEmpresas, setListaEmpresas] = useState(inicialEmpresas);
-  const listaEstRef = useRef(listaEstudiantes);
-  listaEstRef.current = listaEstudiantes;
-  const hayCambiosRef = useRef(false);
 
+  // Filtros y paginación de listas
   const [busquedaDisp, setBusquedaDisp] = useState("");
   const [busquedaAsig, setBusquedaAsig] = useState("");
   const busquedaDispDif = useDeferredValue(busquedaDisp);
   const busquedaAsigDif = useDeferredValue(busquedaAsig);
   const [limiteDisp, setLimiteDisp] = useState(PAGINA_DISP);
   const [programaEstudio, setProgramaEstudio] = useState("Todos");
+  const [vista, setVista] = useState("asignados");
+  const [filtroPracticas, setFiltroPracticas] = useState("todos");
 
+  // Estado de asignación actual vs snapshot inicial (para detectar cambios)
   const [seleccionados, setSeleccionados] = useState([]);
   const [idsIniciales, setIdsIniciales] = useState([]);
   const [objetosAsignados, setObjetosAsignados] = useState([]);
@@ -492,13 +475,21 @@ export default function AsignarEstudiantes({
   const [representantesPorEstudiante, setRepresentantesPorEstudiante] = useState({});
   const [representantesIniciales, setRepresentantesIniciales] = useState({});
 
-  const [vista, setVista] = useState("asignados");
-  const [filtroPracticas, setFiltroPracticas] = useState("todos");
+  // Estado de red y retroalimentación visual
+  const [cargandoEstudiantes, setCargandoEstudiantes] = useState(
+    () => inicialEstudiantes.length === 0
+  );
   const [cargandoAsignados, setCargandoAsignados] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [mensajeExito, setMensajeExito] = useState("");
 
+  // Referencias para sincronización sin re-disparar efectos innecesarios
+  const seleccionManualDocenteRef = useRef(false);
+  const inicializoDocentePropRef = useRef(false);
+  const listaEstRef = useRef(listaEstudiantes);
+  listaEstRef.current = listaEstudiantes;
+  const hayCambiosRef = useRef(false);
   const cacheAsignacionesRef = useRef(ASIG_MEM);
 
   const aniosDisponibles = useMemo(() => {
@@ -511,6 +502,7 @@ export default function AsignarEstudiantes({
     ];
   }, [anioDefecto]);
 
+  // Sincronización con props actualizadas desde el componente padre
   useEffect(() => {
     if (Array.isArray(docentesProp) && docentesProp.length > 0) {
       setDocentes((prev) =>
@@ -542,6 +534,7 @@ export default function AsignarEstudiantes({
     }
   }, [empresasProp]);
 
+  // Actualización de empresas cuando se registra o edita una empresa fuera de este panel
   useEffect(() => {
     const refrescarEmpresasDesdeEvento = (ev) => {
       const empNueva = ev?.detail?.empresa || ev?.detail;
@@ -580,86 +573,85 @@ export default function AsignarEstudiantes({
       );
   }, []);
 
+  // Carga inicial de catálogos desde el backend
   useEffect(() => {
     let activo = true;
     const headers = cabeceraAuth();
 
-    const cargarFaltantes = () => {
-      pedir("L::/docentes", () =>
-        api.get("/docentes", {
-          params: { per_page: 500, todos: 1, all: true },
-          headers,
-        })
+    pedir("L::/docentes", () =>
+      api.get("/docentes", {
+        params: { per_page: 500, todos: 1, all: true },
+        headers,
+      })
+    )
+      .then((res) => {
+        const d = extraerLista(res.data);
+        if (d.length > 0) {
+          MEM.docentes = d;
+          if (activo) {
+            setDocentes((prev) => (d.length >= prev.length ? d : prev));
+          }
+        }
+      })
+      .catch(() => {});
+
+    if (listaEstRef.current.length === 0) setCargandoEstudiantes(true);
+    pedir("L::/estudiantes?all=true", () =>
+      api.get("/estudiantes", {
+        params: { per_page: 1000, todos: 1, all: true },
+        headers,
+      })
+    )
+      .then((res) => {
+        const l = extraerLista(res.data);
+        if (l.length > 0) {
+          MEM.estudiantes = l;
+          if (activo) {
+            setListaEstudiantes((prev) => (l.length >= prev.length ? l : prev));
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (activo) setCargandoEstudiantes(false);
+      });
+
+    if (!Array.isArray(modulosProp) || modulosProp.length === 0) {
+      pedir("L::/modulos-profesionales", () =>
+        api.get("/modulos-profesionales", { headers })
       )
         .then((res) => {
-          const d = extraerLista(res.data);
-          if (d.length > 0) {
-            MEM.docentes = d;
-            if (activo) {
-              setDocentes((prev) => (d.length >= prev.length ? d : prev));
-            }
-          }
+          const modsNorm = normalizarModulosCon123(extraerLista(res.data));
+          MEM.modulos = modsNorm;
+          if (activo) setListaModulos(modsNorm);
         })
         .catch(() => {});
+    }
 
-      if (listaEstRef.current.length === 0) setCargandoEstudiantes(true);
-      pedir("L::/estudiantes?all=true", () =>
-        api.get("/estudiantes", {
-          params: { per_page: 1000, todos: 1, all: true },
-          headers,
-        })
-      )
-        .then((res) => {
-          const l = extraerLista(res.data);
-          if (l.length > 0) {
-            MEM.estudiantes = l;
-            if (activo) {
-              setListaEstudiantes((prev) => (l.length >= prev.length ? l : prev));
-            }
+    pedir("L::/empresas", () =>
+      api.get("/empresas", {
+        params: { per_page: 500, todos: 1, all: true },
+        headers,
+      })
+    )
+      .then((res) => {
+        const l = extraerLista(res.data);
+        if (l.length > 0) {
+          MEM.empresas = l;
+          if (activo) {
+            setListaEmpresas((prev) => (l.length >= prev.length ? l : prev));
           }
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (activo) setCargandoEstudiantes(false);
-        });
+        }
+      })
+      .catch(() => {});
 
-      if (!Array.isArray(modulosProp) || modulosProp.length === 0) {
-        pedir("L::/modulos-profesionales", () =>
-          api.get("/modulos-profesionales", { headers })
-        )
-          .then((res) => {
-            const modsNorm = normalizarModulosCon123(extraerLista(res.data));
-            MEM.modulos = modsNorm;
-            if (activo) setListaModulos(modsNorm);
-          })
-          .catch(() => {});
-      }
-
-      pedir("L::/empresas", () =>
-        api.get("/empresas", {
-          params: { per_page: 500, todos: 1, all: true },
-          headers,
-        })
-      )
-        .then((res) => {
-          const l = extraerLista(res.data);
-          if (l.length > 0) {
-            MEM.empresas = l;
-            if (activo) {
-              setListaEmpresas((prev) => (l.length >= prev.length ? l : prev));
-            }
-          }
-        })
-        .catch(() => {});
-    };
-
-    cargarFaltantes();
     return () => {
       activo = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Selección inicial del docente asesor
   useEffect(() => {
     if (seleccionManualDocenteRef.current) return;
 
@@ -690,9 +682,23 @@ export default function AsignarEstudiantes({
     [moduloActual]
   );
 
-  const manejarCambioModulo = (nuevoModuloId) => {
+  const docenteActual = useMemo(
+    () =>
+      docentes.find(
+        (d) => k(obtenerIdDocente(d)) === k(docenteSeleccionadoId)
+      ) || null,
+    [docentes, docenteSeleccionadoId]
+  );
+
+  const fechaPorDefectoAnio = `${anio || new Date().getFullYear()}-${hoyISO().slice(5)}`;
+
+  const limpiarAvisos = () => {
     setError("");
     setMensajeExito("");
+  };
+
+  const manejarCambioModulo = (nuevoModuloId) => {
+    limpiarAvisos();
     setModuloId(nuevoModuloId);
 
     const encargadoDelModulo = docentePorModulo[k(nuevoModuloId)];
@@ -703,12 +709,9 @@ export default function AsignarEstudiantes({
 
   const manejarCambioDocenteDelModulo = (nuevoDocenteId) => {
     seleccionManualDocenteRef.current = true;
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
     setDocenteSeleccionadoId(nuevoDocenteId ? k(nuevoDocenteId) : "");
   };
-
-  const fechaPorDefectoAnio = `${anio || new Date().getFullYear()}-${hoyISO().slice(5)}`;
 
   const aplicarSnapshotAsignacion = (snap) => {
     setSeleccionados(snap.ids);
@@ -768,6 +771,7 @@ export default function AsignarEstudiantes({
         empresaBaseId ??
         "";
       mapaEmpresas[idKey] = empId ? k(empId) : "";
+
       const representanteId =
         est?.id_representante_empresa ??
         est?.representante_empresa_id ??
@@ -796,38 +800,36 @@ export default function AsignarEstudiantes({
       const raw = typeof item === "object" && item !== null ? item : { id: item };
       const baseAlumno = raw?.estudiante || raw?.alumno || raw;
       const idEst = obtenerIdEstudiante(raw);
-      if (idEst != null) {
-        const previo = combinadosMap.get(k(idEst)) || {};
-        const tieneEmpresaEnRespuesta =
-          typeof raw === "object" &&
-          raw !== null &&
-          Object.prototype.hasOwnProperty.call(raw, "id_empresa");
-          const tieneRepresentanteEnRespuesta =
-            typeof raw === "object" &&
-            raw !== null &&
-            Object.prototype.hasOwnProperty.call(raw, "id_representante_empresa");
-        combinadosMap.set(k(idEst), {
-          ...previo,
-          ...baseAlumno,
-          id_estudiante: idEst,
-          fecha_inicio:
-            raw?.fecha_inicio ??
-            raw?.pivot?.fecha_inicio ??
-            baseAlumno?.fecha_inicio ??
-            previo?.fecha_inicio,
-          id_empresa: tieneEmpresaEnRespuesta
-            ? raw.id_empresa
-            : raw?.empresa_id ??
-              raw?.pivot?.id_empresa ??
-              baseAlumno?.id_empresa ??
-              previo?.id_empresa,
-          id_representante_empresa: tieneRepresentanteEnRespuesta
-            ? raw.id_representante_empresa
-            : raw?.representante_empresa_id ??
-              baseAlumno?.id_representante_empresa ??
-              previo?.id_representante_empresa,
-        });
-      }
+      if (idEst == null) return;
+
+      const idKey = k(idEst);
+      const previo = combinadosMap.get(idKey) || {};
+      const tieneEmpresaEnRespuesta =
+        Object.prototype.hasOwnProperty.call(raw, "id_empresa");
+      const tieneRepresentanteEnRespuesta =
+        Object.prototype.hasOwnProperty.call(raw, "id_representante_empresa");
+
+      combinadosMap.set(idKey, {
+        ...previo,
+        ...baseAlumno,
+        id_estudiante: idEst,
+        fecha_inicio:
+          raw?.fecha_inicio ??
+          raw?.pivot?.fecha_inicio ??
+          baseAlumno?.fecha_inicio ??
+          previo?.fecha_inicio,
+        id_empresa: tieneEmpresaEnRespuesta
+          ? raw.id_empresa
+          : raw?.empresa_id ??
+            raw?.pivot?.id_empresa ??
+            baseAlumno?.id_empresa ??
+            previo?.id_empresa,
+        id_representante_empresa: tieneRepresentanteEnRespuesta
+          ? raw.id_representante_empresa
+          : raw?.representante_empresa_id ??
+            baseAlumno?.id_representante_empresa ??
+            previo?.id_representante_empresa,
+      });
     });
 
     const ids = Array.from(combinadosMap.keys());
@@ -837,13 +839,9 @@ export default function AsignarEstudiantes({
 
     ids.forEach((idKey) => {
       const item = combinadosMap.get(idKey);
-      if (item?.fecha_inicio) {
-        mapaFechas[idKey] = item.fecha_inicio;
-      } else if (!mapaFechas[idKey]) {
+      if (!mapaFechas[idKey]) {
         mapaFechas[idKey] =
-          item?.fecha_inicio ||
-          item?.pivot?.fecha_inicio ||
-          fechaPorDefectoAnio;
+          item?.fecha_inicio || item?.pivot?.fecha_inicio || fechaPorDefectoAnio;
       }
       if (Object.prototype.hasOwnProperty.call(item || {}, "id_empresa")) {
         mapaEmpresas[idKey] = item.id_empresa ? k(item.id_empresa) : "";
@@ -858,7 +856,9 @@ export default function AsignarEstudiantes({
       }
       if (item?.id_representante_empresa != null) {
         mapaRepresentantes[idKey] = k(item.id_representante_empresa);
-      } else if (Object.prototype.hasOwnProperty.call(item || {}, "id_representante_empresa")) {
+      } else if (
+        Object.prototype.hasOwnProperty.call(item || {}, "id_representante_empresa")
+      ) {
         mapaRepresentantes[idKey] = "";
       }
     });
@@ -873,17 +873,16 @@ export default function AsignarEstudiantes({
     };
   };
 
+  // Carga de estudiantes asignados según docente, módulo y año
   useEffect(() => {
     if (!docenteSeleccionadoId && !moduloId) {
-      setSeleccionados([]);
-      setIdsIniciales([]);
-      setObjetosAsignados([]);
-      setFechasInicio({});
-      setFechasInicioIniciales({});
-      setEmpresasPorEstudiante({});
-      setEmpresasIniciales({});
-      setRepresentantesPorEstudiante({});
-      setRepresentantesIniciales({});
+      aplicarSnapshotAsignacion({
+        ids: [],
+        objetos: [],
+        fechas: {},
+        empresas: {},
+        representantes: {},
+      });
       return;
     }
 
@@ -939,6 +938,7 @@ export default function AsignarEstudiantes({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaEstudiantes]);
 
+  // Listas derivadas y filtros
   const docentesFiltrados = useMemo(() => {
     const q = busquedaDocente.trim().toLowerCase();
     if (!q) return docentes;
@@ -949,14 +949,6 @@ export default function AsignarEstudiantes({
         .includes(q)
     );
   }, [docentes, busquedaDocente]);
-
-  const docenteActual = useMemo(
-    () =>
-      docentes.find(
-        (d) => k(obtenerIdDocente(d)) === k(docenteSeleccionadoId)
-      ) || null,
-    [docentes, docenteSeleccionadoId]
-  );
 
   const mapa = useMemo(() => {
     const m = new Map();
@@ -986,7 +978,6 @@ export default function AsignarEstudiantes({
 
   const setSel = useMemo(() => new Set(seleccionados.map(k)), [seleccionados]);
   const setIni = useMemo(() => new Set(idsIniciales.map(k)), [idsIniciales]);
-
   const totalEstudiantesRegistrados = listaEstudiantes.length;
 
   const indiceBusqueda = useMemo(() => {
@@ -1013,9 +1004,9 @@ export default function AsignarEstudiantes({
   const disponibles = useMemo(() => {
     const q = busquedaDispDif.trim().toLowerCase();
     return estudiantesElegibles.filter((est) => {
+      const texto = indiceBusqueda.get(k(obtenerIdEstudiante(est))) ?? "";
       return (
-        (!q ||
-          (indiceBusqueda.get(k(obtenerIdEstudiante(est))) ?? "").includes(q)) &&
+        (!q || texto.includes(q)) &&
         (programaEstudio === "Todos" || programaDe(est) === programaEstudio)
       );
     });
@@ -1027,6 +1018,7 @@ export default function AsignarEstudiantes({
       .map((id) => mapa.get(k(id)) || { id, nombres: `Estudiante #${id}` })
       .filter((est) => coincide(est, q));
   }, [seleccionados, mapa, busquedaAsigDif]);
+
   const idsAsignadosConEmpresa = useMemo(
     () =>
       new Set(
@@ -1045,6 +1037,7 @@ export default function AsignarEstudiantes({
       ),
     [asignados, empresasPorEstudiante]
   );
+
   const asignadosConEmpresa = useMemo(
     () =>
       asignados.filter((est) =>
@@ -1052,6 +1045,7 @@ export default function AsignarEstudiantes({
       ),
     [asignados, idsAsignadosConEmpresa]
   );
+
   const asignadosSinEmpresa = useMemo(
     () =>
       asignados.filter(
@@ -1059,12 +1053,13 @@ export default function AsignarEstudiantes({
       ),
     [asignados, idsAsignadosConEmpresa]
   );
+
   const asignadosVisibles =
     filtroPracticas === "con-empresa"
       ? asignadosConEmpresa
       : filtroPracticas === "sin-empresa"
-        ? asignadosSinEmpresa
-        : asignados;
+      ? asignadosSinEmpresa
+      : asignados;
 
   const agregados = seleccionados.filter((id) => !setIni.has(k(id))).length;
   const quitados = idsIniciales.filter((id) => !setSel.has(k(id))).length;
@@ -1088,18 +1083,20 @@ export default function AsignarEstudiantes({
     setLimiteDisp(PAGINA_DISP);
   }, [busquedaDispDif, programaEstudio]);
 
-  const bloqueado = guardando;
+  // ==========================================================================
+  // 5. ACCIONES DE ASIGNACIÓN, EMPRESA, CONTACTO Y GUARDADO EN API
+  // ==========================================================================
 
-  const construirFilasRealtime = (
+  const construirFilasDetalle = (
     idsLista,
     mapaEmp,
     mapaFech,
-    docId = docenteSeleccionadoId,
-    modId = moduloId,
     mapaRep = representantesPorEstudiante
   ) => {
-    const nombreMod = nombreModuloDe(moduloActual) || `Módulo ${modId || 1}`;
+    const nombreMod = nombreModuloDe(moduloActual) || `Módulo ${moduloId || 1}`;
     const nombreDoc = nombreDe(docenteActual) || "Asesor EFSRT";
+    const idModNormalizado = normalizarIdApi(moduloId);
+    const idDocNormalizado = normalizarIdApi(docenteSeleccionadoId);
 
     return idsLista.map((id) => {
       const key = k(id);
@@ -1112,26 +1109,28 @@ export default function AsignarEstudiantes({
       );
 
       return {
-        id_estudiante: Number.isNaN(Number(id)) ? id : Number(id),
+        id_estudiante: normalizarIdApi(id),
         nombres: nombresDe(estObj) || nombreDe(estObj) || `Estudiante #${id}`,
         apellidos: apellidosDe(estObj),
         dni: dniDe(estObj),
         programa_estudios: programaDe(estObj),
-        id_docente: docId || null,
+        id_docente: idDocNormalizado,
+        id_docente_asesor: idDocNormalizado,
         docente_responsable: nombreDoc,
-        id_modulo: modId || null,
+        id_modulo: idModNormalizado,
         numero_modulo: numModuloActual,
         nombre_modulo: nombreMod,
-        periodo_academico: `${anio}-II`,
-        id_empresa: empIdStr
-          ? Number.isNaN(Number(empIdStr))
-            ? empIdStr
-            : Number(empIdStr)
-          : null,
+        id_empresa: normalizarIdApi(empIdStr),
         empresa_nombre: empObj ? nombreEmpresaDe(empObj) : "",
-        id_representante_empresa: representanteId || null,
+        empresa_institucion: empObj ? nombreEmpresaDe(empObj) : "",
+        ubicacion: empObj ? ubicacionEmpresaDe(empObj) : "",
+        id_representante_empresa: normalizarIdApi(representanteId),
         representante_empresa_nombre: representante?.nombre || "",
+        representante_empresa_cargo: representante?.cargo || "",
+        representante_empresa_telefono: representante?.telefono || "",
+        representante_empresa_correo: representante?.correo || "",
         fecha_inicio: mapaFech[key] || fechaPorDefectoAnio,
+        periodo_academico: `${anio}-II`,
         anio: Number(anio),
       };
     });
@@ -1147,7 +1146,6 @@ export default function AsignarEstudiantes({
     const alcanceKey = `${k(docenteSeleccionadoId || "none")}::${k(
       moduloId || "1"
     )}::${anio}`;
-    const filas = construirFilasRealtime(idsLista, mapaEmp, mapaFech, undefined, undefined, mapaRep);
 
     emitirEventoTiempoRealEmpresas({
       alcanceKey,
@@ -1158,24 +1156,22 @@ export default function AsignarEstudiantes({
       nombre_modulo: nombreModuloDe(moduloActual) || `Módulo ${moduloId || 1}`,
       anio: Number(anio),
       confirmadoServidor,
-      asignaciones: filas,
+      asignaciones: construirFilasDetalle(idsLista, mapaEmp, mapaFech, mapaRep),
     });
   };
 
   const agregar = (id) => {
     const key = k(id);
     if (setSel.has(key)) return;
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
 
     const fechaAsignada = fechasInicio[key] || fechaPorDefectoAnio;
     const empresaAsignada =
-      empresasPorEstudiante[key] !== undefined &&
-      empresasPorEstudiante[key] !== ""
+      empresasPorEstudiante[key] !== undefined && empresasPorEstudiante[key] !== ""
         ? k(empresasPorEstudiante[key])
         : empresaBaseId
-          ? k(empresaBaseId)
-          : "";
+        ? k(empresaBaseId)
+        : "";
 
     const nextIds = [...seleccionados, key];
     const nextFechas = { ...fechasInicio, [key]: fechaAsignada };
@@ -1189,9 +1185,7 @@ export default function AsignarEstudiantes({
 
   const quitar = (id) => {
     const key = k(id);
-    setError("");
-    setMensajeExito("");
-
+    limpiarAvisos();
     const nextIds = seleccionados.filter((x) => k(x) !== key);
     setSeleccionados(nextIds);
     notificarTiempoReal(nextIds, empresasPorEstudiante, fechasInicio, false);
@@ -1199,8 +1193,7 @@ export default function AsignarEstudiantes({
 
   const cambiarFechaEstudiante = (id, nuevaFecha) => {
     const key = k(id);
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
     const nextFechas = { ...fechasInicio, [key]: nuevaFecha };
     setFechasInicio(nextFechas);
     if (setSel.has(key)) {
@@ -1210,8 +1203,7 @@ export default function AsignarEstudiantes({
 
   const cambiarEmpresaEstudiante = (id, nuevaEmpresaId) => {
     const key = k(id);
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
     const nextEmpresas = { ...empresasPorEstudiante, [key]: nuevaEmpresaId };
     const empresaNueva = nuevaEmpresaId ? mapaEmpresas.get(k(nuevaEmpresaId)) : null;
     const representanteActual = representantesPorEstudiante[key];
@@ -1222,17 +1214,23 @@ export default function AsignarEstudiantes({
       ...representantesPorEstudiante,
       [key]: contactoSigueVinculado ? representanteActual : "",
     };
+
     setEmpresasPorEstudiante(nextEmpresas);
     setRepresentantesPorEstudiante(nextRepresentantes);
     if (setSel.has(key)) {
-      notificarTiempoReal(seleccionados, nextEmpresas, fechasInicio, false, nextRepresentantes);
+      notificarTiempoReal(
+        seleccionados,
+        nextEmpresas,
+        fechasInicio,
+        false,
+        nextRepresentantes
+      );
     }
   };
 
   const cambiarRepresentanteEstudiante = (id, nuevoRepresentanteId) => {
     const key = k(id);
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
     const nextRepresentantes = {
       ...representantesPorEstudiante,
       [key]: nuevoRepresentanteId,
@@ -1250,12 +1248,12 @@ export default function AsignarEstudiantes({
   };
 
   const aplicarEmpresaBaseATodos = (empId) => {
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
     setEmpresaBaseId(empId);
     const nextEmpresas = { ...empresasPorEstudiante };
     const nextRepresentantes = { ...representantesPorEstudiante };
     const empresaNueva = empId ? mapaEmpresas.get(k(empId)) : null;
+
     seleccionados.forEach((id) => {
       const key = k(id);
       nextEmpresas[key] = empId;
@@ -1265,6 +1263,7 @@ export default function AsignarEstudiantes({
       );
       if (!valido) nextRepresentantes[key] = "";
     });
+
     setEmpresasPorEstudiante(nextEmpresas);
     setRepresentantesPorEstudiante(nextRepresentantes);
     if (seleccionados.length > 0) {
@@ -1280,8 +1279,7 @@ export default function AsignarEstudiantes({
 
   const aplicarFechaBaseATodos = (nuevaFecha) => {
     if (!nuevaFecha) return;
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
     const nextFechas = { ...fechasInicio };
     seleccionados.forEach((id) => {
       nextFechas[k(id)] = nuevaFecha;
@@ -1294,8 +1292,7 @@ export default function AsignarEstudiantes({
 
   const agregarVisibles = () => {
     if (disponibles.length === 0) return;
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
 
     const ya = new Set(seleccionados.map(k));
     const nuevosIds = disponibles
@@ -1325,8 +1322,7 @@ export default function AsignarEstudiantes({
 
   const quitarVisibles = () => {
     if (asignados.length === 0) return;
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
     const idsAQuitar = new Set(asignados.map((e) => k(obtenerIdEstudiante(e))));
     const nextIds = seleccionados.filter((id) => !idsAQuitar.has(k(id)));
     setSeleccionados(nextIds);
@@ -1359,62 +1355,21 @@ export default function AsignarEstudiantes({
     }
 
     setGuardando(true);
-    setError("");
-    setMensajeExito("");
+    limpiarAvisos();
+
     try {
       const headers = cabeceraAuth();
       const nombreMod = nombreModuloDe(moduloActual) || `Módulo ${moduloId}`;
       const nombreDoc = nombreDe(docenteActual) || "Asesor EFSRT";
-      const idModNum = Number.isNaN(Number(moduloId))
-        ? moduloId
-        : Number(moduloId);
-      const idDocNum = Number.isNaN(Number(docenteSeleccionadoId))
-        ? docenteSeleccionadoId
-        : Number(docenteSeleccionadoId);
+      const idModNum = normalizarIdApi(moduloId);
+      const idDocNum = normalizarIdApi(docenteSeleccionadoId);
 
-      const asignacionesDetalladas = seleccionados.map((id) => {
-        const key = k(id);
-        const empIdStr = empresasPorEstudiante[key] || empresaBaseId || "";
-        const empObj = empIdStr ? mapaEmpresas.get(k(empIdStr)) : null;
-        const estObj = mapa.get(key) || {};
-        const representanteId = representantesPorEstudiante[key] || "";
-        const representante = empObj?.representantes?.find(
-          (item) => k(item.id_representante_empresa) === k(representanteId)
-        );
-
-        return {
-          id_estudiante: Number.isNaN(Number(id)) ? id : Number(id),
-          nombres: nombresDe(estObj) || nombreDe(estObj) || `Estudiante #${id}`,
-          apellidos: apellidosDe(estObj),
-          dni: dniDe(estObj),
-          id_docente: idDocNum,
-          id_docente_asesor: idDocNum,
-          docente_responsable: nombreDoc,
-          id_modulo: idModNum,
-          numero_modulo: numModuloActual,
-          nombre_modulo: nombreMod,
-          programa_estudios: programaDe(estObj),
-          id_empresa: empIdStr
-            ? Number.isNaN(Number(empIdStr))
-              ? empIdStr
-              : Number(empIdStr)
-            : null,
-          empresa_nombre: empObj ? nombreEmpresaDe(empObj) : "",
-          id_representante_empresa: representanteId
-            ? Number.isNaN(Number(representanteId))
-              ? representanteId
-              : Number(representanteId)
-            : null,
-          representante_empresa_nombre: representante?.nombre || "",
-          representante_empresa_cargo: representante?.cargo || "",
-          representante_empresa_telefono: representante?.telefono || "",
-          representante_empresa_correo: representante?.correo || "",
-          ubicacion: empObj ? ubicacionEmpresaDe(empObj) : "",
-          fecha_inicio: fechasInicio[key] || fechaPorDefectoAnio,
-          periodo_academico: `${anio}-II`,
-          anio: Number(anio),
-        };
-      });
+      const asignacionesDetalladas = construirFilasDetalle(
+        seleccionados,
+        empresasPorEstudiante,
+        fechasInicio,
+        representantesPorEstudiante
+      );
 
       const payload = {
         id_modulo: idModNum,
@@ -1422,16 +1377,10 @@ export default function AsignarEstudiantes({
         nombre_modulo: nombreMod,
         id_docente: idDocNum,
         id_docente_asesor: idDocNum,
-        id_empresa: empresaBaseId
-          ? Number.isNaN(Number(empresaBaseId))
-            ? empresaBaseId
-            : Number(empresaBaseId)
-          : null,
+        id_empresa: normalizarIdApi(empresaBaseId),
         periodo_academico: `${anio}-II`,
         anio: Number(anio),
-        estudiantes: seleccionados.map((id) =>
-          Number.isNaN(Number(id)) ? id : Number(id)
-        ),
+        estudiantes: seleccionados.map(normalizarIdApi),
         asignaciones: asignacionesDetalladas,
       };
 
@@ -1463,48 +1412,23 @@ export default function AsignarEstudiantes({
       });
 
       asignacionesDetalladas.forEach((item) => {
-        const registroExpediente = {
-          id_estudiante: item.id_estudiante,
-          nombres: item.nombres,
-          apellidos: item.apellidos,
-          dni: item.dni,
-          id_docente: item.id_docente,
-          id_docente_asesor: item.id_docente_asesor,
-          docente_responsable: item.docente_responsable,
-          id_modulo: item.id_modulo,
-          numero_modulo: item.numero_modulo,
-          nombre_modulo: item.nombre_modulo,
-          programa_estudios: item.programa_estudios,
-          id_empresa: item.id_empresa,
-          id_representante_empresa: item.id_representante_empresa,
-          representante_empresa_nombre: item.representante_empresa_nombre,
-          representante_empresa_cargo: item.representante_empresa_cargo,
-          representante_empresa_telefono: item.representante_empresa_telefono,
-          representante_empresa_correo: item.representante_empresa_correo,
-          empresa_institucion: item.empresa_nombre,
-          empresa_nombre: item.empresa_nombre,
-          ubicacion: item.ubicacion,
-          fecha_inicio: item.fecha_inicio,
-          periodo_academico: item.periodo_academico,
-          anio: item.anio,
-          estado_registro: "Por verificar",
-          actualizado_en: new Date().toISOString(),
-        };
-
         guardarRegistroLocalModulo(
           item.id_estudiante,
           k(item.id_modulo),
           item.numero_modulo,
-          registroExpediente
+          {
+            ...item,
+            estado_registro: "Por verificar",
+            actualizado_en: new Date().toISOString(),
+          }
         );
       });
 
       invalidateApiCache("/asignaciones-asesores");
       invalidateApiCache("/empresas");
 
-      const alcanceKey = `${k(docenteSeleccionadoId)}::${k(moduloId)}::${anio}`;
       emitirEventoTiempoRealEmpresas({
-        alcanceKey,
+        alcanceKey: `${k(docenteSeleccionadoId)}::${k(moduloId)}::${anio}`,
         id_modulo: moduloId,
         numero_modulo: numModuloActual,
         nombre_modulo: nombreMod,
@@ -1532,6 +1456,10 @@ export default function AsignarEstudiantes({
       setGuardando(false);
     }
   };
+
+  // ==========================================================================
+  // 6. TEMA Y SUBCOMPONENTES VISUALES
+  // ==========================================================================
 
   const t = darkMode
     ? {
@@ -1623,7 +1551,7 @@ export default function AsignarEstudiantes({
 
         <button
           type="button"
-          disabled={bloqueado}
+          disabled={guardando}
           onClick={() => agregar(id)}
           aria-label={`Agregar ${nombre}`}
           title="Asignar al módulo, empresa y expediente"
@@ -1683,7 +1611,7 @@ export default function AsignarEstudiantes({
             <Building2 className="h-3.5 w-3.5 shrink-0 text-blue-600" />
             <select
               value={empEst}
-              disabled={bloqueado}
+              disabled={guardando}
               onChange={(e) => cambiarEmpresaEstudiante(id, e.target.value)}
               aria-label={`Empresa de ${nombre}`}
               className={`max-w-[160px] cursor-pointer truncate rounded-lg border px-2 py-1.5 text-xs font-semibold outline-none transition ${t.campo}`}
@@ -1704,7 +1632,7 @@ export default function AsignarEstudiantes({
             <UserCheck className="h-3.5 w-3.5 shrink-0 text-violet-600" />
             <select
               value={representanteEst}
-              disabled={bloqueado || contactosEmpresa.length === 0}
+              disabled={guardando || contactosEmpresa.length === 0}
               onChange={(e) => cambiarRepresentanteEstudiante(id, e.target.value)}
               aria-label={`Representante de empresa para ${nombre}`}
               className={`max-w-[170px] cursor-pointer truncate rounded-lg border px-2 py-1.5 text-xs font-semibold outline-none transition ${t.campo}`}
@@ -1717,7 +1645,8 @@ export default function AsignarEstudiantes({
                   key={contacto.id_representante_empresa}
                   value={k(contacto.id_representante_empresa)}
                 >
-                  {contacto.nombre}{contacto.cargo ? ` · ${contacto.cargo}` : ""}
+                  {contacto.nombre}
+                  {contacto.cargo ? ` · ${contacto.cargo}` : ""}
                 </option>
               ))}
             </select>
@@ -1731,7 +1660,7 @@ export default function AsignarEstudiantes({
             <input
               type="date"
               value={fechaEst}
-              disabled={bloqueado}
+              disabled={guardando}
               onChange={(e) => cambiarFechaEstudiante(id, e.target.value)}
               aria-label={`Fecha de inicio de ${nombre}`}
               className={`rounded-lg border px-2 py-1.5 text-xs font-semibold outline-none transition ${t.campo}`}
@@ -1740,7 +1669,7 @@ export default function AsignarEstudiantes({
 
           <button
             type="button"
-            disabled={bloqueado}
+            disabled={guardando}
             onClick={() => quitar(id)}
             aria-label={`Quitar ${nombre}`}
             title="Quitar del módulo"
@@ -1764,6 +1693,10 @@ export default function AsignarEstudiantes({
       <p className="mt-1 max-w-xs text-xs leading-relaxed">{texto}</p>
     </div>
   );
+
+  // ==========================================================================
+  // 7. RENDERIZADO PRINCIPAL
+  // ==========================================================================
 
   return (
     <div className="space-y-5">
@@ -1807,7 +1740,7 @@ export default function AsignarEstudiantes({
           <button
             type="button"
             onClick={guardarAsignacion}
-            disabled={bloqueado}
+            disabled={guardando}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60 sm:text-sm"
           >
             {guardando ? (
@@ -1881,8 +1814,7 @@ export default function AsignarEstudiantes({
             <select
               value={anio}
               onChange={(e) => {
-                setError("");
-                setMensajeExito("");
+                limpiarAvisos();
                 setAnio(e.target.value);
               }}
               disabled={guardando}
@@ -2072,7 +2004,7 @@ export default function AsignarEstudiantes({
                   <button
                     type="button"
                     onClick={() => aplicarFechaBaseATodos(fechaPorDefectoAnio)}
-                    disabled={bloqueado}
+                    disabled={guardando}
                     className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:underline disabled:opacity-40"
                     title="Aplicar fecha base del año a todos"
                   >
@@ -2083,7 +2015,7 @@ export default function AsignarEstudiantes({
                 <button
                   type="button"
                   onClick={quitarVisibles}
-                  disabled={asignados.length === 0 || bloqueado}
+                  disabled={asignados.length === 0 || guardando}
                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:underline disabled:opacity-40 disabled:no-underline"
                 >
                   <ChevronsLeft className="h-3.5 w-3.5" />
@@ -2097,6 +2029,7 @@ export default function AsignarEstudiantes({
               setBusquedaAsig,
               "Buscar estudiantes asignados en este módulo"
             )}
+
             <div
               className="flex flex-wrap gap-2"
               role="group"
@@ -2177,7 +2110,7 @@ export default function AsignarEstudiantes({
               <button
                 type="button"
                 onClick={agregarVisibles}
-                disabled={disponibles.length === 0 || bloqueado}
+                disabled={disponibles.length === 0 || guardando}
                 className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline"
               >
                 Agregar ({disponibles.length})
@@ -2262,8 +2195,10 @@ export default function AsignarEstudiantes({
         <p className={`flex flex-wrap items-center gap-2 text-xs ${t.texto2}`}>
           <ArrowRightLeft className="h-3.5 w-3.5 text-blue-600" />
           <span>
-            Total: <strong className="text-current">{totalEstudiantesRegistrados}</strong> ·
-            Disponibles: <strong className="text-current">{totalDisponibles}</strong>
+            Total:{" "}
+            <strong className="text-current">{totalEstudiantesRegistrados}</strong>{" "}
+            · Disponibles:{" "}
+            <strong className="text-current">{totalDisponibles}</strong>
           </span>
           {hayCambios && (
             <>
@@ -2301,7 +2236,7 @@ export default function AsignarEstudiantes({
           <button
             type="button"
             onClick={guardarAsignacion}
-            disabled={bloqueado}
+            disabled={guardando}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
           >
             {guardando && <Loader2 className="h-4 w-4 animate-spin" />}

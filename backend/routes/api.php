@@ -21,7 +21,6 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ProyectoController;
 use App\Http\Controllers\Api\NotificacionController;
 
-
 // Rutas públicas
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -130,6 +129,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/tareas/{id}', [CalendarioController::class, 'destroyTarea']);
         Route::put('/notas', [CalendarioController::class, 'upsertNotas']);
     });
+
+    // Proyectos
     Route::get('proyectos/opciones', [ProyectoController::class, 'opciones']);
     Route::patch('proyectos/{proyecto}/estado', [ProyectoController::class, 'moverEstado']);
     Route::apiResource('proyectos', ProyectoController::class);
